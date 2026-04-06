@@ -10,8 +10,8 @@ describe("filterComment", () => {
     expect(filterComment("oi")).toEqual({ action: "ignore", reason: "too_short" });
   });
 
-  it("ignora emoji-only", () => {
-    expect(filterComment("😂🔥")).toEqual({ action: "ignore", reason: "emoji_only" });
+  it("responde emoji-only pra puxar conversa", () => {
+    expect(filterComment("😂🔥")).toEqual({ action: "respond" });
   });
 
   it("ignora tags-only", () => {

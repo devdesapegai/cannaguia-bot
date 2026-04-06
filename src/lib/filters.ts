@@ -34,7 +34,7 @@ export function filterComment(text: string, username?: string): FilterResult {
 
   if (!trimmed) return { action: "ignore", reason: "empty" };
   if (trimmed.length < 3) return { action: "ignore", reason: "too_short" };
-  if (EMOJI_ONLY_REGEX.test(trimmed)) return { action: "ignore", reason: "emoji_only" };
+  if (EMOJI_ONLY_REGEX.test(trimmed)) return { action: "respond" };
   if (TAG_REGEX.test(trimmed)) return { action: "ignore", reason: "tags_only" };
 
   // Bot detection por username
