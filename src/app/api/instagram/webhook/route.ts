@@ -195,7 +195,7 @@ async function processMessaging(entry: WebhookEntry) {
     }
 
     // Gerar resposta
-    const result = await generateDmReply(text);
+    const result = await generateDmReply(text, senderId);
     if (!result) {
       log("reply_failed", { comment_id: msgId, error: "no dm reply generated" });
       continue;

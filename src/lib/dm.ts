@@ -3,6 +3,8 @@ import { validateOutput } from "./output-filter";
 import { postProcessDm } from "./post-process";
 import { PROFILE_HANDLE } from "./constants";
 import { log } from "./logger";
+import { addMessage, getHistory, getMessageCount } from "./dm-history";
+import { extractProfileFromMessage, profileSummary, markWhatsAppOffered, getProfile } from "./user-profile";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -20,30 +22,25 @@ TOM:
 - Máximo 2 frases curtas + pergunta. Não enrole.
 - Sempre puxe conversa — pergunte algo relacionado ao que a pessoa mandou.
 - Se a pessoa pediu info sobre plantinha, uso medicinal, cultivo etc, responda com conhecimento real.
+- Use o HISTÓRICO DA CONVERSA pra manter contexto. Não repita perguntas que já fez.
 
-DETECÇÃO DE OPORTUNIDADE — WHATSAPP:
-Quando perceber que a pessoa quer:
-- consultoria personalizada
-- ajuda específica com caso dela
-- conversar mais a fundo sobre tratamento
-- falar sobre o caso de saúde dela
-- pedir recomendação específica
-- qualquer coisa que precise atenção humana real
+WHATSAPP — QUANDO OFERECER:
+Quando a conversa indicar que a pessoa precisa de orientação personalizada, adicione [WHATSAPP] no final.
 
-Responda normalmente e NO FINAL adicione exatamente: [WHATSAPP]
-Isso vai inserir o link automaticamente. NÃO escreva o link você mesma.
+Ofereça na 2ª ou 3ª troca quando:
+- A pessoa fala de condição de saúde específica (ansiedade, dor, insônia, epilepsia, depressão)
+- Quer saber sobre uso medicinal pro caso dela
+- Pede recomendação personalizada
+- Quer consultoria
 
-Exemplos de quando usar [WHATSAPP]:
-- "quero começar tratamento" → responde + [WHATSAPP]
-- "meu filho tem epilepsia" → acolhe + [WHATSAPP]
-- "preciso de orientação" → responde + [WHATSAPP]
-- "qual óleo usar pro meu caso" → responde + [WHATSAPP]
+NÃO ofereça quando:
+- Conversa casual, zueira, elogio
+- Pergunta genérica sobre cultivo
+- A pessoa já recebeu o link antes (veja histórico)
+- A pessoa está satisfeita só conversando por ali
 
-Exemplos de quando NÃO usar:
-- "oi" → só cumprimenta
-- "sobre cultivo" → responde normal
-- "kkkk" → zueira normal
-- pergunta genérica sobre plantinha → responde normal
+Se a pessoa quiser continuar no DM, continue normalmente sem forçar WhatsApp.
+Se já ofereceu WhatsApp e a pessoa não quis, NÃO ofereça de novo.
 
 VOCABULÁRIO DO NICHO (use sempre):
 - Diga: plantinha, planta, f1, fitinho, uso medicinal, natural, sessão, bolado
@@ -77,17 +74,51 @@ export interface DmResult {
   whatsapp: boolean;
 }
 
-export async function generateDmReply(message: string): Promise<DmResult | null> {
+export async function generateDmReply(message: string, senderId: string): Promise<DmResult | null> {
+  // Registrar mensagem e extrair perfil
+  addMessage(senderId, "user", message);
+  extractProfileFromMessage(senderId, message);
+
+  const profile = getProfile(senderId);
+
   // Se a pessoa pede WhatsApp direto
   if (WHATSAPP_DIRECT_REGEX.test(message)) {
-    return { reply: "Claro! Me chama lá no WhatsApp que a gente conversa melhor 💚", whatsapp: true };
+    const reply = "Claro! Me chama lá no WhatsApp que a gente conversa melhor 💚";
+    addMessage(senderId, "assistant", reply);
+    markWhatsAppOffered(senderId);
+    return { reply, whatsapp: true };
   }
 
   try {
+    // Montar historico da conversa
+    const history = getHistory(senderId);
+    const input: Array<{ role: "user" | "assistant"; content: string }> = [];
+
+    for (const msg of history.slice(0, -1)) {
+      input.push({ role: msg.role, content: msg.text });
+    }
+    input.push({ role: "user", content: message });
+
+    // Injetar perfil e contexto no prompt
+    const msgCount = getMessageCount(senderId);
+    let systemPrompt = DM_PROMPT;
+
+    const summary = profileSummary(senderId);
+    if (summary) {
+      systemPrompt += `\n\nPERFIL DA PESSOA:\n${summary}`;
+    }
+
+    if (msgCount >= 2 && !profile.whatsappOffered) {
+      systemPrompt += `\n\nEssa é a ${msgCount}ª mensagem. Se o assunto for pessoal/saúde, ofereça WhatsApp.`;
+    }
+    if (profile.whatsappOffered) {
+      systemPrompt += `\n\nWhatsApp JÁ FOI OFERECIDO. NÃO ofereça novamente. Continue a conversa normalmente.`;
+    }
+
     const response = await client.responses.create({
       model: process.env.OPENAI_MODEL || "gpt-5.4-mini",
-      instructions: DM_PROMPT,
-      input: `Mensagem: "${message}"`,
+      instructions: systemPrompt,
+      input,
       temperature: 0.9,
       max_output_tokens: 120,
     });
@@ -105,6 +136,10 @@ export async function generateDmReply(message: string): Promise<DmResult | null>
       console.warn(`[dm] Flagged: ${flagged.join(", ")}`);
       return null;
     }
+
+    // Registrar resposta e marcar whatsapp se oferecido
+    addMessage(senderId, "assistant", processed);
+    if (whatsapp) markWhatsAppOffered(senderId);
 
     return { reply: processed, whatsapp };
   } catch (error) {
@@ -157,15 +192,12 @@ export async function sendDm(recipientId: string, message: string): Promise<bool
 }
 
 export async function sendDmWithWhatsApp(recipientId: string, text: string): Promise<boolean> {
-  // Primeiro manda o texto (ja tem typing + delay)
   const textSent = await sendDm(recipientId, text);
   if (!textSent) return false;
 
-  // Pequeno delay antes do card
   await sendTyping(recipientId);
   await new Promise(r => setTimeout(r, 2000));
 
-  // Depois manda o botao do WhatsApp
   return sendRequest(recipientId, {
     message: {
       attachment: {
