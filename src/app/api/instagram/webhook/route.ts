@@ -138,6 +138,10 @@ async function processWebhook(body: WebhookPayload) {
       const isHater = filter.action === "respond_hater";
       const caption = media?.id ? await getMediaCaption(media.id) : "";
 
+      // Delay aleatorio pra parecer mais natural (15-45s)
+      const delay = Math.floor(Math.random() * 30 + 15) * 1000;
+      await new Promise(r => setTimeout(r, delay));
+
       // Gerar resposta (LLM classifica + responde numa unica chamada)
       const result = await generateReply(text, caption, isHater);
       if (!result) {
