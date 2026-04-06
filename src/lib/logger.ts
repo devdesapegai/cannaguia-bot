@@ -9,6 +9,8 @@ type EventType =
   | "comment_classified"
   | "rate_limited"
   | "cooldown_skipped"
+  | "dm_received"
+  | "dm_sent"
   | "error";
 
 interface LogData {

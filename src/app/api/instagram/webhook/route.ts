@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { filterComment } from "@/lib/filters";
 import { generateReply } from "@/lib/llm";
 import { replyToComment, hideComment, getMediaCaption, hasAlreadyReplied } from "@/lib/instagram";
+import { generateDmReply, sendDm } from "@/lib/dm";
 import { isDuplicate, isOnCooldown } from "@/lib/dedup";
 import { canReply } from "@/lib/rate-limit";
 import { log } from "@/lib/logger";
@@ -58,8 +59,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Bad request" }, { status: 400 });
   }
 
-  const fields = (body.entry || []).flatMap((e: { changes?: Array<{ field: string }> }) => (e.changes || []).map(c => c.field));
-  log("webhook_received", { processing_time_ms: Date.now() - startTime, fields: fields.join(",") || "empty" });
+  const fields = (body.entry || []).flatMap((e: WebhookEntry) => (e.changes || []).map(c => c.field));
+  const hasMessaging = (body.entry || []).some((e: WebhookEntry) => e.messaging && e.messaging.length > 0);
+  log("webhook_received", { processing_time_ms: Date.now() - startTime, fields: fields.join(",") || (hasMessaging ? "messaging" : "empty") });
 
   // Processar em background com after() — retorna 200 imediatamente
   after(async () => {
@@ -77,6 +79,10 @@ async function processWebhook(body: WebhookPayload) {
   if (body.object !== "instagram") return;
 
   for (const entry of body.entry || []) {
+    // Processar DMs
+    await processMessaging(entry);
+
+    // Processar comentarios
     for (const change of entry.changes || []) {
       if (change.field !== "comments") continue;
 
@@ -164,20 +170,79 @@ async function processWebhook(body: WebhookPayload) {
   }
 }
 
+async function processMessaging(entry: WebhookEntry) {
+  for (const msg of entry.messaging || []) {
+    // Ignorar echos (mensagens enviadas por nos)
+    if (msg.message?.is_echo) continue;
+
+    const senderId = msg.sender?.id;
+    const text = msg.message?.text;
+    if (!senderId || !text) continue;
+
+    // Deduplicacao
+    const msgId = msg.message?.mid || `dm_${senderId}_${Date.now()}`;
+    if (isDuplicate(msgId)) {
+      log("duplicate_skipped", { comment_id: msgId });
+      continue;
+    }
+
+    log("dm_received", { comment_id: msgId, username: senderId, text: text.slice(0, 100) });
+
+    // Rate limiting
+    if (!canReply()) {
+      log("rate_limited", { comment_id: msgId });
+      continue;
+    }
+
+    // Delay aleatorio (10-30s pra DM - mais rapido que comentario)
+    const delay = Math.floor(Math.random() * 20 + 10) * 1000;
+    await new Promise(r => setTimeout(r, delay));
+
+    // Gerar resposta
+    const reply = await generateDmReply(text);
+    if (!reply) {
+      log("reply_failed", { comment_id: msgId, error: "no dm reply generated" });
+      continue;
+    }
+
+    log("reply_generated", { comment_id: msgId, reply: reply.slice(0, 100) });
+
+    // Enviar resposta
+    const success = await sendDm(senderId, reply);
+    if (success) {
+      log("dm_sent", { comment_id: msgId, username: senderId, reply: reply.slice(0, 100) });
+    } else {
+      log("reply_failed", { comment_id: msgId, error: "dm send error" });
+    }
+  }
+}
+
+interface WebhookEntry {
+  id: string;
+  time: number;
+  changes?: Array<{
+    field: string;
+    value: {
+      id: string;
+      text: string;
+      from?: { id: string; username: string };
+      media?: { id: string };
+      parent_id?: string;
+    };
+  }>;
+  messaging?: Array<{
+    sender?: { id: string };
+    recipient?: { id: string };
+    timestamp?: number;
+    message?: {
+      mid?: string;
+      text?: string;
+      is_echo?: boolean;
+    };
+  }>;
+}
+
 interface WebhookPayload {
   object: string;
-  entry?: Array<{
-    id: string;
-    time: number;
-    changes?: Array<{
-      field: string;
-      value: {
-        id: string;
-        text: string;
-        from?: { id: string; username: string };
-        media?: { id: string };
-        parent_id?: string;
-      };
-    }>;
-  }>;
+  entry?: WebhookEntry[];
 }
