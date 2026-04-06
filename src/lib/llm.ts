@@ -78,6 +78,7 @@ REGRAS:
 - Português brasileiro informal COM ACENTOS. Gíria: né, pois é, demais, bora, eitaaa, pior que, hein, tlg.
 - Sem markdown, hashtags, bullets ou aspas.
 - Use o contexto do post (caption) pra conectar a resposta.
+- Se houver CONTEXTO DO VIDEO, use como base principal pra responder. Esse contexto descreve o que a Maria fala no video — use pra dar respostas precisas e relevantes ao conteudo real do post.
 
 PROIBIDO:
 - Compra, venda, preço, delivery.
@@ -118,6 +119,7 @@ export async function generateReply(
   comment: string,
   caption: string,
   isHater: boolean,
+  videoContext?: string,
 ): Promise<{ reply: string; category: CommentCategory } | null> {
   try {
     const systemPrompt = SYSTEM_PROMPT + buildRecentContext();
@@ -125,6 +127,7 @@ export async function generateReply(
     let userMessage = "";
     const shortCaption = summarizeCaption(caption);
     if (shortCaption) userMessage += `Post: "${shortCaption}"\n`;
+    if (videoContext) userMessage += `Contexto do video: ${videoContext}\n`;
     userMessage += `Comentario: "${comment}"`;
     if (isHater) userMessage += `\n(comentario ofensivo — responda firme e tranquila)`;
 

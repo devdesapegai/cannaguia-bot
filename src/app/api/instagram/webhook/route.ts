@@ -179,8 +179,7 @@ async function processWebhook(body: WebhookPayload) {
       await new Promise(r => setTimeout(r, delay));
 
       // Gerar resposta (LLM classifica + responde numa unica chamada)
-      const fullCaption = videoContext ? `${caption}\n\nContexto do video: ${videoContext}` : caption;
-      const result = await generateReply(text, fullCaption, isHater);
+      const result = await generateReply(text, caption, isHater, videoContext);
       if (!result) {
         log("reply_failed", { comment_id: commentId, error: "no reply generated" });
         continue;
