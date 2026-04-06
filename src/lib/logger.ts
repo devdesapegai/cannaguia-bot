@@ -21,6 +21,7 @@ interface LogData {
   filter_reason?: string;
   category?: string;
   reason?: string;
+  fields?: string;
   error?: string;
   processing_time_ms?: number;
   [key: string]: unknown;

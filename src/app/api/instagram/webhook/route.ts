@@ -58,7 +58,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Bad request" }, { status: 400 });
   }
 
-  log("webhook_received", { processing_time_ms: Date.now() - startTime });
+  const fields = (body.entry || []).flatMap((e: { changes?: Array<{ field: string }> }) => (e.changes || []).map(c => c.field));
+  log("webhook_received", { processing_time_ms: Date.now() - startTime, fields: fields.join(",") || "empty" });
 
   // Processar em background com after() — retorna 200 imediatamente
   after(async () => {
