@@ -4,7 +4,7 @@ import crypto from "crypto";
 import { filterComment } from "@/lib/filters";
 import { generateReply } from "@/lib/llm";
 import { replyToComment, hideComment, getMediaCaption, hasAlreadyReplied } from "@/lib/instagram";
-import { generateDmReply, sendDm } from "@/lib/dm";
+import { generateDmReply, sendDm, sendDmWithWhatsApp } from "@/lib/dm";
 import { isDuplicate, isOnCooldown } from "@/lib/dedup";
 import { canReply } from "@/lib/rate-limit";
 import { log } from "@/lib/logger";
@@ -195,18 +195,21 @@ async function processMessaging(entry: WebhookEntry) {
     }
 
     // Gerar resposta
-    const reply = await generateDmReply(text);
-    if (!reply) {
+    const result = await generateDmReply(text);
+    if (!result) {
       log("reply_failed", { comment_id: msgId, error: "no dm reply generated" });
       continue;
     }
 
-    log("reply_generated", { comment_id: msgId, reply: reply.slice(0, 100) });
+    log("reply_generated", { comment_id: msgId, reply: result.reply.slice(0, 100) });
 
-    // Enviar resposta
-    const success = await sendDm(senderId, reply);
+    // Enviar resposta (com ou sem botao WhatsApp)
+    const success = result.whatsapp
+      ? await sendDmWithWhatsApp(senderId, result.reply)
+      : await sendDm(senderId, result.reply);
+
     if (success) {
-      log("dm_sent", { comment_id: msgId, username: senderId, reply: reply.slice(0, 100) });
+      log("dm_sent", { comment_id: msgId, username: senderId, reply: result.reply.slice(0, 100) });
     } else {
       log("reply_failed", { comment_id: msgId, error: "dm send error" });
     }

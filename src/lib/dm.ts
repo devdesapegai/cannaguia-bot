@@ -72,10 +72,15 @@ PROIBIDO:
 
 const WHATSAPP_DIRECT_REGEX = /\b(whatsapp|whats|zap|zapzap|wpp|numero|telefone|contato|ligar|liga)\b/i;
 
-export async function generateDmReply(message: string): Promise<string | null> {
-  // Se a pessoa pede WhatsApp direto, manda o link sem enrolacao
+export interface DmResult {
+  reply: string;
+  whatsapp: boolean;
+}
+
+export async function generateDmReply(message: string): Promise<DmResult | null> {
+  // Se a pessoa pede WhatsApp direto
   if (WHATSAPP_DIRECT_REGEX.test(message)) {
-    return `Claro! Me chama lá no WhatsApp que a gente conversa melhor 👇💚\n${WHATSAPP_LINK}`;
+    return { reply: "Claro! Me chama lá no WhatsApp que a gente conversa melhor 💚", whatsapp: true };
   }
 
   try {
@@ -90,10 +95,9 @@ export async function generateDmReply(message: string): Promise<string | null> {
     const raw = response.output_text?.trim();
     if (!raw) return null;
 
-    // Substituir tag [WHATSAPP] pelo link real
-    let text = raw;
-    const shouldRedirect = text.includes("[WHATSAPP]");
-    text = text.replace(/\s*\[WHATSAPP\]\s*/g, "").trim();
+    // Detectar tag [WHATSAPP]
+    const whatsapp = raw.includes("[WHATSAPP]");
+    const text = raw.replace(/\s*\[WHATSAPP\]\s*/g, "").trim();
 
     const processed = postProcessDm(text);
     const { safe, flagged } = validateOutput(processed);
@@ -102,18 +106,14 @@ export async function generateDmReply(message: string): Promise<string | null> {
       return null;
     }
 
-    if (shouldRedirect) {
-      return processed + `\n\nSe quiser, me chama lá no WhatsApp que a gente conversa melhor 💚\n${WHATSAPP_LINK}`;
-    }
-
-    return processed;
+    return { reply: processed, whatsapp };
   } catch (error) {
     console.error("[dm] Error:", error);
     return null;
   }
 }
 
-export async function sendDm(recipientId: string, message: string): Promise<boolean> {
+async function sendRequest(recipientId: string, payload: Record<string, unknown>): Promise<boolean> {
   const token = process.env.INSTAGRAM_ACCESS_TOKEN;
   if (!token) {
     log("error", { error: "INSTAGRAM_ACCESS_TOKEN not set" });
@@ -129,7 +129,7 @@ export async function sendDm(recipientId: string, message: string): Promise<bool
       },
       body: JSON.stringify({
         recipient: { id: recipientId },
-        message: { text: message },
+        ...payload,
       }),
     });
 
@@ -144,4 +144,35 @@ export async function sendDm(recipientId: string, message: string): Promise<bool
     log("error", { error: `DM send error: ${String(error)}` });
     return false;
   }
+}
+
+export async function sendDm(recipientId: string, message: string): Promise<boolean> {
+  return sendRequest(recipientId, { message: { text: message } });
+}
+
+export async function sendDmWithWhatsApp(recipientId: string, text: string): Promise<boolean> {
+  // Primeiro manda o texto
+  const textSent = await sendDm(recipientId, text);
+  if (!textSent) return false;
+
+  // Depois manda o botao do WhatsApp
+  return sendRequest(recipientId, {
+    message: {
+      attachment: {
+        type: "template",
+        payload: {
+          template_type: "generic",
+          elements: [{
+            title: "Falar com a Maria 💚",
+            subtitle: "Vamos conversar melhor pelo WhatsApp?",
+            buttons: [{
+              type: "web_url",
+              url: WHATSAPP_LINK,
+              title: "Abrir WhatsApp 👇",
+            }],
+          }],
+        },
+      },
+    },
+  });
 }
