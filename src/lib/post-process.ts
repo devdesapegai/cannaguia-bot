@@ -38,10 +38,10 @@ export function postProcess(text: string): string {
 export function postProcessDm(text: string): string {
   let result = text;
 
-  // DM permite ate 3 frases
+  // DM permite ate 2 frases
   const sentences = result.split(SENTENCE_SPLIT).filter(Boolean);
-  if (sentences.length > 3) {
-    result = sentences.slice(0, 3).join(" ");
+  if (sentences.length > 2) {
+    result = sentences.slice(0, 2).join(" ");
   }
 
   // Limitar emojis a 3
@@ -57,10 +57,26 @@ export function postProcessDm(text: string): string {
   // Remover aspas ao redor
   result = result.replace(/^["']|["']$/g, "");
 
-  // DM permite ate 250 chars
+  // DM permite ate 160 chars
   result = result.trim();
-  if (result.length > 250) {
-    result = result.slice(0, 250).replace(/\s+\S*$/, "").trim();
+  if (result.length > 160) {
+    // Tentar cortar na ultima frase completa que cabe
+    const sentencesInResult = result.split(SENTENCE_SPLIT).filter(Boolean);
+    let truncated = "";
+    for (const s of sentencesInResult) {
+      const candidate = truncated ? truncated + " " + s : s;
+      if (candidate.length <= 160) {
+        truncated = candidate;
+      } else {
+        break;
+      }
+    }
+    // Se pelo menos uma frase cabe, usa ela. Senao corta na palavra.
+    if (truncated.length > 0) {
+      result = truncated;
+    } else {
+      result = result.slice(0, 160).replace(/\s+\S*$/, "").trim();
+    }
   }
 
   return result;

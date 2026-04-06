@@ -115,7 +115,7 @@ export function extractProfileFromMessage(userId: string, message: string) {
     cancer: /\b(c[aâ]ncer|tumor|quimio)\b/i,
     parkinson: /\bparkinson\b/i,
     enxaqueca: /\b(enxaqueca|migr[aâ]nea)\b/i,
-    tdah: /\b(tdah|d[eé]ficit de aten[cç][aã]o)\b/i,
+    tdah: /\b(tdah|tdh|d[eé]ficit de aten[cç][aã]o)\b/i,
     estresse: /\b(estress|stress)\b/i,
   };
 

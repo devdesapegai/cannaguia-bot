@@ -14,6 +14,10 @@ Instagram bot for `@mariaconsultoracannabica` — responds to comments, DMs, and
 - `npx jest path/to/test` — run single test file
 - `npx tsc --noEmit` — type-check without emitting
 
+## TypeScript
+
+- Path alias: `@/*` maps to `./src/*` (configured in tsconfig.json and jest.config.ts)
+
 ## Architecture
 
 Three webhook flows share one endpoint (`POST /api/instagram/webhook`):
@@ -58,6 +62,12 @@ comment on the post that mentioned us
 - `src/lib/output-filter.ts` — banned term validation on LLM output
 - `src/lib/post-process.ts` — `postProcess()` for comments (150 chars), `postProcessDm()` for DMs (250 chars)
 - `src/lib/constants.ts` — single source for `OWN_USERNAME` and `PROFILE_HANDLE`
+
+## Runtime Patterns
+
+- **Async processing**: webhook handler uses Next.js `after()` to process events after returning 200 to Meta. All heavy work (LLM calls, API calls, delays) runs inside `after()`.
+- **Instagram API retry**: transient errors (codes 1, 2, 4, 17) are retried once with 2s backoff.
+- **Output fallback**: if LLM response contains banned terms, a rewrite is attempted (max 1 retry). If still flagged, the response is discarded silently.
 
 ## Important Patterns
 
