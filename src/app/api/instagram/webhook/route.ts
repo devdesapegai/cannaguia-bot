@@ -5,6 +5,7 @@ import { filterComment } from "@/lib/filters";
 import { generateReply } from "@/lib/llm";
 import { replyToComment, hideComment, getMediaCaption, hasAlreadyReplied } from "@/lib/instagram";
 import { generateDmReply, sendDm, sendDmWithWhatsApp } from "@/lib/dm";
+import { generateMentionReply, commentOnMedia, getMentionMediaInfo } from "@/lib/mentions";
 import { isDuplicate, isOnCooldown } from "@/lib/dedup";
 import { canReply } from "@/lib/rate-limit";
 import { log } from "@/lib/logger";
@@ -81,6 +82,9 @@ async function processWebhook(body: WebhookPayload) {
   for (const entry of body.entry || []) {
     // Processar DMs
     await processMessaging(entry);
+
+    // Processar mentions
+    await processMentions(entry);
 
     // Processar comentarios
     for (const change of entry.changes || []) {
@@ -171,6 +175,58 @@ async function processWebhook(body: WebhookPayload) {
       } else {
         log("reply_failed", { comment_id: commentId, error: "instagram API error" });
       }
+    }
+  }
+}
+
+async function processMentions(entry: WebhookEntry) {
+  for (const change of entry.changes || []) {
+    if (change.field !== "mentions") continue;
+
+    const mediaId = change.value?.media?.id;
+    if (!mediaId) continue;
+
+    // Deduplicacao
+    const mentionKey = `mention_${mediaId}`;
+    if (isDuplicate(mentionKey)) {
+      log("duplicate_skipped", { comment_id: mentionKey });
+      continue;
+    }
+
+    log("mention_received", { media_id: mediaId });
+
+    // Rate limiting
+    if (!canReply()) {
+      log("rate_limited", { comment_id: mentionKey });
+      continue;
+    }
+
+    // Buscar info do post que nos marcou
+    const mediaInfo = await getMentionMediaInfo(mediaId);
+    const caption = mediaInfo?.caption || "";
+    const username = mediaInfo?.username || "amigo";
+
+    log("mention_received", { media_id: mediaId, username, text: caption.slice(0, 100) });
+
+    // Delay
+    const delay = Math.floor(Math.random() * 30 + 15) * 1000;
+    await new Promise(r => setTimeout(r, delay));
+
+    // Gerar resposta
+    const reply = await generateMentionReply(caption, username);
+    if (!reply) {
+      log("reply_failed", { comment_id: mentionKey, error: "no mention reply generated" });
+      continue;
+    }
+
+    log("reply_generated", { comment_id: mentionKey, reply: reply.slice(0, 100) });
+
+    // Comentar no post
+    const success = await commentOnMedia(mediaId, reply);
+    if (success) {
+      log("mention_replied", { media_id: mediaId, username, reply: reply.slice(0, 100) });
+    } else {
+      log("reply_failed", { comment_id: mentionKey, error: "comment on mention failed" });
     }
   }
 }
