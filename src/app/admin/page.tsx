@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 
 type MediaItem = {
@@ -18,57 +18,74 @@ type MediaItem = {
 export default function AdminPage() {
   const [items, setItems] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadingAll, setLoadingAll] = useState(false);
+  const [loadProgress, setLoadProgress] = useState(0);
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "with" | "without">("all");
   const [search, setSearch] = useState("");
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [hasMore, setHasMore] = useState(false);
   const [editTexts, setEditTexts] = useState<Record<string, string>>({});
+  const [fullyLoaded, setFullyLoaded] = useState(false);
   const router = useRouter();
+  const loadingRef = useRef(false);
 
-  const fetchMedia = useCallback(async (cursor?: string) => {
-    if (cursor) {
-      setLoadingMore(true);
-    } else {
-      setLoading(true);
-    }
-
-    try {
-      const url = cursor ? `/api/admin/media?cursor=${cursor}` : "/api/admin/media";
-      const res = await fetch(url);
-      if (res.status === 401) { router.push("/admin/login"); return; }
-      if (!res.ok) throw new Error("Erro ao carregar midia");
-
-      const data = await res.json();
-
-      if (cursor) {
-        setItems(prev => [...prev, ...data.items]);
-      } else {
-        setItems(data.items);
-      }
-
-      // Update edit texts
-      const texts: Record<string, string> = {};
-      for (const item of data.items) {
-        texts[item.media_id] = item.context_text;
-      }
-      setEditTexts(prev => cursor ? { ...prev, ...texts } : texts);
-
-      setNextCursor(data.nextCursor);
-      setHasMore(data.hasMore);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-      setLoadingMore(false);
-    }
+  const fetchPage = useCallback(async (cursor?: string): Promise<{ items: MediaItem[]; nextCursor: string | null; hasMore: boolean }> => {
+    const url = cursor ? `/api/admin/media?cursor=${cursor}` : "/api/admin/media";
+    const res = await fetch(url);
+    if (res.status === 401) { router.push("/admin/login"); throw new Error("unauthorized"); }
+    if (!res.ok) throw new Error("Erro ao carregar midia");
+    return res.json();
   }, [router]);
 
-  useEffect(() => { fetchMedia(); }, [fetchMedia]);
+  // Load first page fast, then continue in background
+  const loadAll = useCallback(async () => {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
+    setLoading(true);
 
-  // Filter + search (client-side on loaded items)
+    try {
+      // First page — show immediately
+      const first = await fetchPage();
+      setItems(first.items);
+      const texts: Record<string, string> = {};
+      for (const item of first.items) texts[item.media_id] = item.context_text;
+      setEditTexts(texts);
+      setLoadProgress(first.items.length);
+      setLoading(false);
+
+      if (!first.hasMore) { setFullyLoaded(true); loadingRef.current = false; return; }
+
+      // Continue loading in background
+      setLoadingAll(true);
+      let cursor = first.nextCursor;
+      const allItems = [...first.items];
+
+      while (cursor) {
+        const page = await fetchPage(cursor);
+        allItems.push(...page.items);
+        const newTexts: Record<string, string> = {};
+        for (const item of page.items) newTexts[item.media_id] = item.context_text;
+
+        setItems([...allItems]);
+        setEditTexts(prev => ({ ...prev, ...newTexts }));
+        setLoadProgress(allItems.length);
+
+        cursor = page.hasMore ? page.nextCursor : null;
+      }
+
+      setFullyLoaded(true);
+    } catch (e) {
+      if (String(e) !== "Error: unauthorized") setError(String(e));
+    } finally {
+      setLoading(false);
+      setLoadingAll(false);
+      loadingRef.current = false;
+    }
+  }, [fetchPage]);
+
+  useEffect(() => { loadAll(); }, [loadAll]);
+
+  // Filter + search
   const filtered = useMemo(() => {
     let result = items;
     if (filter === "with") result = result.filter(i => i.has_context);
@@ -136,12 +153,22 @@ export default function AdminPage() {
         </div>
       )}
 
+      {/* Loading progress bar */}
+      {loadingAll && (
+        <div style={{ background: "#f3f4f6", borderRadius: 6, padding: 10, marginBottom: 16, fontSize: 13, color: "#666" }}>
+          Carregando todos os posts... {loadProgress} carregados
+          <div style={{ height: 3, background: "#e5e7eb", borderRadius: 2, marginTop: 6 }}>
+            <div style={{ height: 3, background: "#16a34a", borderRadius: 2, transition: "width 0.3s", width: fullyLoaded ? "100%" : "60%" }} />
+          </div>
+        </div>
+      )}
+
       {/* Search */}
       <input
         type="text"
         value={search}
         onChange={e => setSearch(e.target.value)}
-        placeholder="Buscar por caption, contexto ou ID..."
+        placeholder={fullyLoaded ? "Buscar por caption, contexto ou ID..." : "Buscar (carregando posts...)"}
         style={{
           width: "100%", padding: 10, borderRadius: 6, marginBottom: 16,
           border: "1px solid #d1d5db", fontSize: 14, boxSizing: "border-box"
@@ -170,6 +197,7 @@ export default function AdminPage() {
         <>
           <div style={{ fontSize: 13, color: "#666", marginBottom: 12 }}>
             {filtered.length} resultado{filtered.length !== 1 ? "s" : ""}
+            {!fullyLoaded && " (ainda carregando...)"}
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -252,24 +280,6 @@ export default function AdminPage() {
               </div>
             ))}
           </div>
-
-          {/* Load more */}
-          {hasMore && (
-            <div style={{ textAlign: "center", marginTop: 24, paddingBottom: 24 }}>
-              <button
-                onClick={() => nextCursor && fetchMedia(nextCursor)}
-                disabled={loadingMore}
-                style={{
-                  padding: "12px 32px", background: loadingMore ? "#999" : "#111",
-                  color: "#fff", border: "none", borderRadius: 8,
-                  cursor: loadingMore ? "not-allowed" : "pointer",
-                  fontSize: 14, fontWeight: 600,
-                }}
-              >
-                {loadingMore ? "Carregando..." : "Carregar mais"}
-              </button>
-            </div>
-          )}
         </>
       )}
     </div>
