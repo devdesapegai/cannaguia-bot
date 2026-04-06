@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { after } from "next/server";
 import crypto from "crypto";
 import { filterComment } from "@/lib/filters";
-import { generateReply, classify } from "@/lib/llm";
+import { generateReply } from "@/lib/llm";
 import { replyToComment, hideComment, getMediaCaption, hasAlreadyReplied, likeComment } from "@/lib/instagram";
 import { isDuplicate, isOnCooldown } from "@/lib/dedup";
 import { canReply } from "@/lib/rate-limit";
@@ -133,29 +133,26 @@ async function processWebhook(body: WebhookPayload) {
         continue;
       }
 
-      // Classificar comentario
-      const isHater = filter.action === "respond_hater";
-      const category = isHater ? "hater" : classify(text);
-      log("comment_classified", { comment_id: commentId, category });
-
       // Buscar caption do post
+      const isHater = filter.action === "respond_hater";
       const caption = media?.id ? await getMediaCaption(media.id) : "";
 
-      // Gerar resposta
-      const reply = await generateReply(text, caption, isHater);
-      if (!reply) {
+      // Gerar resposta (LLM classifica + responde numa unica chamada)
+      const result = await generateReply(text, caption, isHater);
+      if (!result) {
         log("reply_failed", { comment_id: commentId, error: "no reply generated" });
         continue;
       }
 
-      log("reply_generated", { comment_id: commentId, reply: reply.slice(0, 100) });
+      log("comment_classified", { comment_id: commentId, category: result.category });
+      log("reply_generated", { comment_id: commentId, reply: result.reply.slice(0, 100) });
 
       // Postar resposta
-      const success = await replyToComment(commentId, reply);
+      const success = await replyToComment(commentId, result.reply);
       if (success) {
-        log("reply_posted", { comment_id: commentId, username: from?.username, reply: reply.slice(0, 100) });
+        log("reply_posted", { comment_id: commentId, username: from?.username, reply: result.reply.slice(0, 100) });
         // Curtir o comentario (exceto haters)
-        if (!isHater) await likeComment(commentId);
+        if (result.category !== "hater") await likeComment(commentId);
       } else {
         log("reply_failed", { comment_id: commentId, error: "instagram API error" });
       }
