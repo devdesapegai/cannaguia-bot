@@ -3,6 +3,8 @@ import { filterComment } from "@/lib/filters";
 import { generateReply } from "@/lib/llm";
 import { replyToComment, hideComment, getMediaCaption } from "@/lib/instagram";
 
+const OWN_USERNAME = "mariaconsultoracannabica";
+
 export async function GET(req: NextRequest) {
   const searchParams = req.nextUrl.searchParams;
   const mode = searchParams.get("hub.mode");
@@ -21,9 +23,7 @@ export async function POST(req: NextRequest) {
   console.log("[webhook] POST received");
   try {
     const body = await req.json();
-    console.log("[webhook] Body parsed:", JSON.stringify(body).slice(0, 500));
     await processWebhook(body);
-    console.log("[webhook] Processing complete");
     return NextResponse.json({ status: "ok" }, { status: 200 });
   } catch (error) {
     console.error("[webhook] Error:", error);
@@ -32,38 +32,43 @@ export async function POST(req: NextRequest) {
 }
 
 async function processWebhook(body: WebhookPayload) {
-  console.log("[webhook] Object:", body.object);
-  if (body.object !== "instagram") { console.log("[webhook] Not instagram, skipping"); return; }
+  if (body.object !== "instagram") return;
 
   for (const entry of body.entry || []) {
-    console.log("[webhook] Entry:", entry.id);
     for (const change of entry.changes || []) {
-      console.log("[webhook] Field:", change.field);
-      if (change.field !== "comments") { console.log("[webhook] Not comments, skipping"); continue; }
+      if (change.field !== "comments") continue;
 
-      const { id: commentId, text, media } = change.value;
-      if (!commentId || !text) { console.log("[webhook] No commentId or text"); continue; }
+      const { id: commentId, text, media, from, parent_id } = change.value;
+      if (!commentId || !text) continue;
 
-      console.log(`[webhook] Comment: "${text}" (${commentId})`);
+      // Ignorar comentarios do proprio bot
+      if (from?.username === OWN_USERNAME) {
+        console.log("[webhook] Ignoring own comment");
+        return;
+      }
+
+      // Ignorar replies (comentarios aninhados) — so responde primeiro nivel
+      if (parent_id) {
+        console.log("[webhook] Ignoring nested reply");
+        return;
+      }
+
+      console.log(`[webhook] Comment from @${from?.username}: "${text}" (${commentId})`);
 
       const filter = filterComment(text);
-      console.log("[webhook] Filter result:", JSON.stringify(filter));
+      console.log("[webhook] Filter:", JSON.stringify(filter));
 
       if (filter.action === "ignore") { console.log(`[webhook] Ignored: ${filter.reason}`); return; }
       if (filter.action === "hide") { await hideComment(commentId); return; }
 
-      console.log("[webhook] Getting caption...");
       const caption = media?.id ? await getMediaCaption(media.id) : "";
-      console.log("[webhook] Caption:", caption.slice(0, 100));
-
       const isHater = filter.action === "respond_hater";
+
       console.log("[webhook] Generating reply...");
       const reply = await generateReply(text, caption, isHater);
-      console.log("[webhook] Reply:", reply);
-
       if (!reply) { console.log("[webhook] No reply generated"); return; }
 
-      console.log("[webhook] Posting reply...");
+      console.log(`[webhook] Replying: "${reply}"`);
       const success = await replyToComment(commentId, reply);
       console.log(`[webhook] ${success ? "SUCCESS" : "FAILED"}`);
     }
