@@ -15,107 +15,94 @@ type MediaItem = {
   has_context: boolean;
 };
 
-const PAGE_SIZE = 20;
-
 export default function AdminPage() {
-  const [allItems, setAllItems] = useState<MediaItem[]>([]);
+  const [items, setItems] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "with" | "without">("all");
   const [search, setSearch] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [page, setPage] = useState(1);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
   const [editTexts, setEditTexts] = useState<Record<string, string>>({});
   const router = useRouter();
 
-  const fetchMedia = useCallback(async () => {
-    setLoading(true);
+  const fetchMedia = useCallback(async (cursor?: string) => {
+    if (cursor) {
+      setLoadingMore(true);
+    } else {
+      setLoading(true);
+    }
+
     try {
-      const res = await fetch("/api/admin/media");
+      const url = cursor ? `/api/admin/media?cursor=${cursor}` : "/api/admin/media";
+      const res = await fetch(url);
       if (res.status === 401) { router.push("/admin/login"); return; }
       if (!res.ok) throw new Error("Erro ao carregar midia");
-      const data: MediaItem[] = await res.json();
-      setAllItems(data);
+
+      const data = await res.json();
+
+      if (cursor) {
+        setItems(prev => [...prev, ...data.items]);
+      } else {
+        setItems(data.items);
+      }
+
+      // Update edit texts
       const texts: Record<string, string> = {};
-      for (const item of data) {
+      for (const item of data.items) {
         texts[item.media_id] = item.context_text;
       }
-      setEditTexts(texts);
+      setEditTexts(prev => cursor ? { ...prev, ...texts } : texts);
+
+      setNextCursor(data.nextCursor);
+      setHasMore(data.hasMore);
     } catch (e) {
       setError(String(e));
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   }, [router]);
 
   useEffect(() => { fetchMedia(); }, [fetchMedia]);
 
-  // Filter + search
+  // Filter + search (client-side on loaded items)
   const filtered = useMemo(() => {
-    let items = allItems;
-
-    // Context filter
-    if (filter === "with") items = items.filter(i => i.has_context);
-    if (filter === "without") items = items.filter(i => !i.has_context);
-
-    // Text search
+    let result = items;
+    if (filter === "with") result = result.filter(i => i.has_context);
+    if (filter === "without") result = result.filter(i => !i.has_context);
     if (search.trim()) {
       const q = search.toLowerCase();
-      items = items.filter(i =>
+      result = result.filter(i =>
         i.caption.toLowerCase().includes(q) ||
         i.media_id.includes(q) ||
         (editTexts[i.media_id] || "").toLowerCase().includes(q)
       );
     }
+    return result;
+  }, [items, filter, search, editTexts]);
 
-    // Date range
-    if (dateFrom) {
-      const from = new Date(dateFrom).getTime();
-      items = items.filter(i => new Date(i.timestamp).getTime() >= from);
-    }
-    if (dateTo) {
-      const to = new Date(dateTo + "T23:59:59").getTime();
-      items = items.filter(i => new Date(i.timestamp).getTime() <= to);
-    }
-
-    return items;
-  }, [allItems, filter, search, dateFrom, dateTo, editTexts]);
-
-  // Pagination
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const currentPage = Math.min(page, totalPages);
-  const pageItems = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
-
-  // Reset page when filters change
-  useEffect(() => { setPage(1); }, [filter, search, dateFrom, dateTo]);
-
-  const withCount = allItems.filter(i => i.has_context).length;
-  const withoutCount = allItems.filter(i => !i.has_context).length;
+  const withCount = items.filter(i => i.has_context).length;
+  const withoutCount = items.filter(i => !i.has_context).length;
 
   async function handleSave(item: MediaItem) {
     const text = editTexts[item.media_id]?.trim();
     if (!text) return;
-
     setSaving(item.media_id);
     setError(null);
-
     try {
       const res = await fetch("/api/admin/media", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          media_id: item.media_id,
-          context_text: text,
-          caption: item.caption,
-          permalink: item.permalink,
+          media_id: item.media_id, context_text: text,
+          caption: item.caption, permalink: item.permalink,
         }),
       });
-
       if (!res.ok) throw new Error("Erro ao salvar");
-
-      setAllItems(prev => prev.map(i =>
+      setItems(prev => prev.map(i =>
         i.media_id === item.media_id
           ? { ...i, context_text: text, has_context: true, context_id: "saved" }
           : i
@@ -149,48 +136,24 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* Search + date filters */}
-      <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
-        <input
-          type="text"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Buscar por caption, contexto ou ID..."
-          style={{
-            flex: 1, minWidth: 200, padding: 10, borderRadius: 6,
-            border: "1px solid #d1d5db", fontSize: 14, boxSizing: "border-box"
-          }}
-        />
-        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          <label style={{ fontSize: 13, color: "#666" }}>De:</label>
-          <input
-            type="date"
-            value={dateFrom}
-            onChange={e => setDateFrom(e.target.value)}
-            style={{ padding: 8, borderRadius: 6, border: "1px solid #d1d5db", fontSize: 13 }}
-          />
-          <label style={{ fontSize: 13, color: "#666" }}>Ate:</label>
-          <input
-            type="date"
-            value={dateTo}
-            onChange={e => setDateTo(e.target.value)}
-            style={{ padding: 8, borderRadius: 6, border: "1px solid #d1d5db", fontSize: 13 }}
-          />
-          {(dateFrom || dateTo) && (
-            <button onClick={() => { setDateFrom(""); setDateTo(""); }}
-              style={{ padding: "6px 10px", background: "#e5e7eb", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
-              Limpar datas
-            </button>
-          )}
-        </div>
-      </div>
+      {/* Search */}
+      <input
+        type="text"
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+        placeholder="Buscar por caption, contexto ou ID..."
+        style={{
+          width: "100%", padding: 10, borderRadius: 6, marginBottom: 16,
+          border: "1px solid #d1d5db", fontSize: 14, boxSizing: "border-box"
+        }}
+      />
 
       {/* Filter pills */}
       <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
         <button onClick={() => setFilter("all")} style={{
           padding: "6px 14px", borderRadius: 20, border: "none", cursor: "pointer",
           background: filter === "all" ? "#111" : "#e5e7eb", color: filter === "all" ? "#fff" : "#333", fontSize: 13
-        }}>Todos ({allItems.length})</button>
+        }}>Todos ({items.length})</button>
         <button onClick={() => setFilter("with")} style={{
           padding: "6px 14px", borderRadius: 20, border: "none", cursor: "pointer",
           background: filter === "with" ? "#16a34a" : "#e5e7eb", color: filter === "with" ? "#fff" : "#333", fontSize: 13
@@ -205,15 +168,12 @@ export default function AdminPage() {
         <p style={{ textAlign: "center", color: "#999", padding: 40 }}>Carregando posts do Instagram...</p>
       ) : (
         <>
-          {/* Results info */}
           <div style={{ fontSize: 13, color: "#666", marginBottom: 12 }}>
             {filtered.length} resultado{filtered.length !== 1 ? "s" : ""}
-            {filtered.length > PAGE_SIZE && ` — pagina ${currentPage} de ${totalPages}`}
           </div>
 
-          {/* Items */}
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            {pageItems.map(item => (
+            {filtered.map(item => (
               <div key={item.media_id} style={{
                 border: `2px solid ${item.has_context ? "#bbf7d0" : "#e5e7eb"}`,
                 borderRadius: 10, padding: 16, display: "flex", gap: 16,
@@ -293,53 +253,21 @@ export default function AdminPage() {
             ))}
           </div>
 
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div style={{
-              display: "flex", justifyContent: "center", alignItems: "center",
-              gap: 8, marginTop: 24, paddingBottom: 24
-            }}>
+          {/* Load more */}
+          {hasMore && (
+            <div style={{ textAlign: "center", marginTop: 24, paddingBottom: 24 }}>
               <button
-                onClick={() => setPage(1)}
-                disabled={currentPage === 1}
+                onClick={() => nextCursor && fetchMedia(nextCursor)}
+                disabled={loadingMore}
                 style={{
-                  padding: "6px 12px", border: "1px solid #d1d5db", borderRadius: 6,
-                  background: "#fff", cursor: currentPage === 1 ? "not-allowed" : "pointer",
-                  opacity: currentPage === 1 ? 0.4 : 1, fontSize: 13
+                  padding: "12px 32px", background: loadingMore ? "#999" : "#111",
+                  color: "#fff", border: "none", borderRadius: 8,
+                  cursor: loadingMore ? "not-allowed" : "pointer",
+                  fontSize: 14, fontWeight: 600,
                 }}
-              >Primeira</button>
-              <button
-                onClick={() => setPage(p => Math.max(1, p - 1))}
-                disabled={currentPage === 1}
-                style={{
-                  padding: "6px 12px", border: "1px solid #d1d5db", borderRadius: 6,
-                  background: "#fff", cursor: currentPage === 1 ? "not-allowed" : "pointer",
-                  opacity: currentPage === 1 ? 0.4 : 1, fontSize: 13
-                }}
-              >Anterior</button>
-
-              <span style={{ fontSize: 14, color: "#333", padding: "0 8px" }}>
-                {currentPage} / {totalPages}
-              </span>
-
-              <button
-                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                disabled={currentPage === totalPages}
-                style={{
-                  padding: "6px 12px", border: "1px solid #d1d5db", borderRadius: 6,
-                  background: "#fff", cursor: currentPage === totalPages ? "not-allowed" : "pointer",
-                  opacity: currentPage === totalPages ? 0.4 : 1, fontSize: 13
-                }}
-              >Proxima</button>
-              <button
-                onClick={() => setPage(totalPages)}
-                disabled={currentPage === totalPages}
-                style={{
-                  padding: "6px 12px", border: "1px solid #d1d5db", borderRadius: 6,
-                  background: "#fff", cursor: currentPage === totalPages ? "not-allowed" : "pointer",
-                  opacity: currentPage === totalPages ? 0.4 : 1, fontSize: 13
-                }}
-              >Ultima</button>
+              >
+                {loadingMore ? "Carregando..." : "Carregar mais"}
+              </button>
             </div>
           )}
         </>
