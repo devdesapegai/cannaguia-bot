@@ -70,12 +70,15 @@ export async function likeComment(commentId: string): Promise<boolean> {
   const token = process.env.INSTAGRAM_ACCESS_TOKEN;
   if (!token) return false;
 
-  const res = await fetchWithRetry(`${GRAPH_URL}/${commentId}/likes`, {
-    method: "POST",
-    headers: authHeaders(token),
-  });
-
-  return res.ok;
+  try {
+    const res = await fetch(`${GRAPH_URL}/${commentId}/likes`, {
+      method: "POST",
+      headers: authHeaders(token),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 export async function hideComment(commentId: string): Promise<boolean> {
