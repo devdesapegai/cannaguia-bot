@@ -143,6 +143,11 @@ async function processWebhook(body: WebhookPayload) {
       // Buscar caption do post
       const isHater = filter.action === "respond_hater";
       const caption = media?.id ? await getMediaCaption(media.id) : "";
+      if (caption) {
+        log("caption_fetched", { comment_id: commentId, media_id: mediaId, text: caption.slice(0, 100) });
+      } else {
+        log("caption_empty", { comment_id: commentId, media_id: mediaId });
+      }
 
       // Delay aleatorio pra parecer mais natural (15-45s)
       const delay = Math.floor(Math.random() * 30 + 15) * 1000;

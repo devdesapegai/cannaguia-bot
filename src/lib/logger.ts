@@ -11,6 +11,8 @@ type EventType =
   | "cooldown_skipped"
   | "dm_received"
   | "dm_sent"
+  | "caption_fetched"
+  | "caption_empty"
   | "error";
 
 interface LogData {
