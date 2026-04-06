@@ -3,7 +3,7 @@ import { after } from "next/server";
 import crypto from "crypto";
 import { filterComment } from "@/lib/filters";
 import { generateReply } from "@/lib/llm";
-import { replyToComment, hideComment, getMediaCaption, hasAlreadyReplied, likeComment } from "@/lib/instagram";
+import { replyToComment, hideComment, getMediaCaption, hasAlreadyReplied } from "@/lib/instagram";
 import { isDuplicate, isOnCooldown } from "@/lib/dedup";
 import { canReply } from "@/lib/rate-limit";
 import { log } from "@/lib/logger";
@@ -153,8 +153,6 @@ async function processWebhook(body: WebhookPayload) {
       const success = await replyToComment(commentId, mention + result.reply);
       if (success) {
         log("reply_posted", { comment_id: commentId, username: from?.username, reply: result.reply.slice(0, 100) });
-        // Curtir o comentario (exceto haters)
-        if (result.category !== "hater") await likeComment(commentId);
       } else {
         log("reply_failed", { comment_id: commentId, error: "instagram API error" });
       }
