@@ -146,14 +146,24 @@ async function sendRequest(recipientId: string, payload: Record<string, unknown>
   }
 }
 
+async function sendTyping(recipientId: string): Promise<void> {
+  await sendRequest(recipientId, { sender_action: "typing_on" });
+}
+
 export async function sendDm(recipientId: string, message: string): Promise<boolean> {
+  await sendTyping(recipientId);
+  await new Promise(r => setTimeout(r, 5000));
   return sendRequest(recipientId, { message: { text: message } });
 }
 
 export async function sendDmWithWhatsApp(recipientId: string, text: string): Promise<boolean> {
-  // Primeiro manda o texto
+  // Primeiro manda o texto (ja tem typing + delay)
   const textSent = await sendDm(recipientId, text);
   if (!textSent) return false;
+
+  // Pequeno delay antes do card
+  await sendTyping(recipientId);
+  await new Promise(r => setTimeout(r, 2000));
 
   // Depois manda o botao do WhatsApp
   return sendRequest(recipientId, {
