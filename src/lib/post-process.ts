@@ -1,4 +1,5 @@
 const MAX_SENTENCES = 2;
+const MAX_CHARS = 150;
 const MAX_EMOJIS = 3;
 const EMOJI_REGEX = /\p{Emoji_Presentation}|\p{Emoji}\uFE0F/gu;
 const SENTENCE_SPLIT = /(?<=[.!?])\s+/;
@@ -25,5 +26,11 @@ export function postProcess(text: string): string {
   // Remover aspas ao redor (LLM as vezes coloca)
   result = result.replace(/^["']|["']$/g, "");
 
-  return result.trim();
+  // Limite de caracteres - corta na ultima palavra inteira
+  result = result.trim();
+  if (result.length > MAX_CHARS) {
+    result = result.slice(0, MAX_CHARS).replace(/\s+\S*$/, "").trim();
+  }
+
+  return result;
 }

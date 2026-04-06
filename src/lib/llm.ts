@@ -145,7 +145,7 @@ export async function generateReply(
       instructions: systemPrompt,
       input,
       temperature: 0.9,
-      max_output_tokens: 100,
+      max_output_tokens: 60,
     });
 
     const text = response.output_text?.trim();
@@ -179,7 +179,7 @@ async function rewriteFallback(originalText: string, attempt = 0): Promise<strin
       instructions: FALLBACK_PROMPT,
       input: `Resposta original: "${originalText}"`,
       temperature: 0.7,
-      max_output_tokens: 100,
+      max_output_tokens: 60,
     });
 
     const text = response.output_text?.trim();

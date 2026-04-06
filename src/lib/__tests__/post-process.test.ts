@@ -20,6 +20,13 @@ describe("postProcess", () => {
     expect(postProcess('"Adorei essa plantinha 🌱"')).toBe("Adorei essa plantinha 🌱");
   });
 
+  it("corta texto longo na ultima palavra inteira", () => {
+    const long = "Perfil indica com mirceno e linalol ajuda demais no sono, experimenta comecar com pouco e vai sentindo o que funciona melhor pra voce 🌱💚";
+    const result = postProcess(long);
+    expect(result.length).toBeLessThanOrEqual(150);
+    expect(result).not.toMatch(/\s$/);
+  });
+
   it("lida com texto vazio", () => {
     expect(postProcess("")).toBe("");
   });
