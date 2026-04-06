@@ -1,15 +1,18 @@
-const BANNED_WORDS = [
-  "maconha", "marijuana", "weed", "erva", "baseado", "beck",
-  "fumar", "chapado", "brisa", "larica", "stoner", "420",
-  "cannabis",
-  "comprar", "compre", "vender", "venda", "preco", "preço",
-  "delivery", "entrega", "pix",
-  "curar", "cura ", "prescrevo", "receito",
-  "mg/kg", "mg por kg", "miligrama",
+const BANNED_PATTERNS = [
+  /\bmaconha\b/i, /\bmarijuana\b/i, /\bweed\b/i, /\berva\b/i,
+  /\bbaseado\b/i, /\bbeck\b/i, /\bcannabis\b/i,
+  /\bfumar\b/i, /\bchapado\b/i, /\bbrisa\b/i, /\blarica\b/i,
+  /\bstoner\b/i, /\b420\b/i,
+  /\bcomprar\b/i, /\bcompre\b/i, /\bvender\b/i, /\bvenda\b/i,
+  /\bpreco\b/i, /\bpreço\b/i,
+  /\bdelivery\b/i, /\bentrega\b/i, /\bpix\b/i,
+  /\bcurar\b/i, /\bprescrevo\b/i, /\breceito\b/i,
+  /mg\/kg/i, /mg por kg/i, /\bmiligrama\b/i,
 ];
 
 export function validateOutput(text: string): { safe: boolean; flagged: string[] } {
-  const lower = text.toLowerCase();
-  const flagged = BANNED_WORDS.filter((word) => lower.includes(word));
+  const flagged = BANNED_PATTERNS
+    .filter((pattern) => pattern.test(text))
+    .map((p) => p.source);
   return { safe: flagged.length === 0, flagged };
 }

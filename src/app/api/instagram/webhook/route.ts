@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { after } from "next/server";
+import crypto from "crypto";
 import { filterComment } from "@/lib/filters";
 import { generateReply } from "@/lib/llm";
 import { replyToComment, hideComment, getMediaCaption } from "@/lib/instagram";
+import { isDuplicate, isOnCooldown } from "@/lib/dedup";
+import { canReply } from "@/lib/rate-limit";
+import { log } from "@/lib/logger";
 
 const OWN_USERNAME = "mariaconsultoracannabica";
 
@@ -11,7 +16,7 @@ export async function GET(req: NextRequest) {
   const token = searchParams.get("hub.verify_token");
   const challenge = searchParams.get("hub.challenge");
   if (mode === "subscribe" && token === process.env.WEBHOOK_VERIFY_TOKEN) {
-    console.log("[webhook] Challenge verified");
+    log("webhook_received", { text: "challenge verified" });
     return new NextResponse(challenge, { status: 200 });
   }
   return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -20,15 +25,51 @@ export async function GET(req: NextRequest) {
 export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
-  console.log("[webhook] POST received");
+  const startTime = Date.now();
+
+  // Ler raw body pra validacao de assinatura
+  const rawBody = await req.text();
+
+  // Validar assinatura (se APP_SECRET configurado)
+  const appSecret = process.env.INSTAGRAM_APP_SECRET;
+  if (appSecret) {
+    const signature = req.headers.get("x-hub-signature-256") || "";
+    const expectedSig = "sha256=" + crypto
+      .createHmac("sha256", appSecret)
+      .update(rawBody)
+      .digest("hex");
+
+    const sigBuffer = Buffer.from(signature);
+    const expectedBuffer = Buffer.from(expectedSig);
+
+    if (sigBuffer.length !== expectedBuffer.length ||
+        !crypto.timingSafeEqual(sigBuffer, expectedBuffer)) {
+      log("signature_invalid");
+      // Retorna 200 mesmo assim — Meta interpreta 401 como endpoint quebrado
+      return NextResponse.json({ status: "ok" }, { status: 200 });
+    }
+  }
+
+  let body: WebhookPayload;
   try {
-    const body = await req.json();
-    await processWebhook(body);
-    return NextResponse.json({ status: "ok" }, { status: 200 });
-  } catch (error) {
-    console.error("[webhook] Error:", error);
+    body = JSON.parse(rawBody);
+  } catch {
+    log("error", { error: "invalid JSON" });
     return NextResponse.json({ error: "Bad request" }, { status: 400 });
   }
+
+  log("webhook_received", { processing_time_ms: Date.now() - startTime });
+
+  // Processar em background com after() — retorna 200 imediatamente
+  after(async () => {
+    try {
+      await processWebhook(body);
+    } catch (err) {
+      log("error", { error: String(err) });
+    }
+  });
+
+  return NextResponse.json({ status: "ok" }, { status: 200 });
 }
 
 async function processWebhook(body: WebhookPayload) {
@@ -41,41 +82,89 @@ async function processWebhook(body: WebhookPayload) {
       const { id: commentId, text, media, from, parent_id } = change.value;
       if (!commentId || !text) continue;
 
-      // Ignorar comentarios do proprio bot
-      if (from?.username === OWN_USERNAME) {
-        console.log("[webhook] Ignoring own comment");
+      // Ignorar proprios comentarios
+      if (from?.username === OWN_USERNAME) return;
+
+      // Ignorar replies aninhados (so responde primeiro nivel)
+      if (parent_id) return;
+
+      // Deduplicacao
+      if (isDuplicate(commentId)) {
+        log("duplicate_skipped", { comment_id: commentId });
         return;
       }
 
-      // Ignorar replies (comentarios aninhados) — so responde primeiro nivel
-      if (parent_id) {
-        console.log("[webhook] Ignoring nested reply");
+      // Cooldown por usuario por post
+      const userId = from?.id || "unknown";
+      const mediaId = media?.id || "unknown";
+      if (isOnCooldown(userId, mediaId)) {
+        log("cooldown_skipped", { comment_id: commentId, username: from?.username, media_id: mediaId });
         return;
       }
 
-      console.log(`[webhook] Comment from @${from?.username}: "${text}" (${commentId})`);
+      log("webhook_received", {
+        comment_id: commentId,
+        username: from?.username,
+        media_id: mediaId,
+        text: text.slice(0, 100),
+      });
 
+      // Filtro de entrada
       const filter = filterComment(text);
-      console.log("[webhook] Filter:", JSON.stringify(filter));
+      if (filter.action === "ignore") {
+        log("comment_filtered", { comment_id: commentId, filter_action: "ignore", filter_reason: filter.reason });
+        return;
+      }
+      if (filter.action === "hide") {
+        log("comment_filtered", { comment_id: commentId, filter_action: "hide", filter_reason: filter.reason });
+        await hideComment(commentId);
+        return;
+      }
 
-      if (filter.action === "ignore") { console.log(`[webhook] Ignored: ${filter.reason}`); return; }
-      if (filter.action === "hide") { await hideComment(commentId); return; }
+      // Rate limiting
+      if (!canReply()) {
+        log("rate_limited", { comment_id: commentId });
+        return;
+      }
 
+      // Buscar caption do post
       const caption = media?.id ? await getMediaCaption(media.id) : "";
       const isHater = filter.action === "respond_hater";
 
-      console.log("[webhook] Generating reply...");
+      // Gerar resposta
       const reply = await generateReply(text, caption, isHater);
-      if (!reply) { console.log("[webhook] No reply generated"); return; }
+      if (!reply) {
+        log("reply_failed", { comment_id: commentId, error: "no reply generated" });
+        return;
+      }
 
-      console.log(`[webhook] Replying: "${reply}"`);
+      log("reply_generated", { comment_id: commentId, reply: reply.slice(0, 100) });
+
+      // Postar resposta
       const success = await replyToComment(commentId, reply);
-      console.log(`[webhook] ${success ? "SUCCESS" : "FAILED"}`);
+      if (success) {
+        log("reply_posted", { comment_id: commentId, username: from?.username, reply: reply.slice(0, 100) });
+      } else {
+        log("reply_failed", { comment_id: commentId, error: "instagram API error" });
+      }
     }
   }
 }
 
 interface WebhookPayload {
   object: string;
-  entry?: Array<{ id: string; time: number; changes?: Array<{ field: string; value: { id: string; text: string; from?: { id: string; username: string }; media?: { id: string }; parent_id?: string; }; }>; }>;
+  entry?: Array<{
+    id: string;
+    time: number;
+    changes?: Array<{
+      field: string;
+      value: {
+        id: string;
+        text: string;
+        from?: { id: string; username: string };
+        media?: { id: string };
+        parent_id?: string;
+      };
+    }>;
+  }>;
 }
