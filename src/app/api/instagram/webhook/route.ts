@@ -91,13 +91,22 @@ async function processWebhook(body: WebhookPayload) {
       if (change.field !== "comments") continue;
 
       const { id: commentId, text, media, from, parent_id } = change.value;
-      if (!commentId || !text) continue;
+      if (!commentId || !text) {
+        log("comment_skipped", { comment_id: commentId || "none", reason: "no_id_or_text" });
+        continue;
+      }
 
       // Ignorar proprios comentarios
-      if (from?.username === OWN_USERNAME) continue;
+      if (from?.username === OWN_USERNAME) {
+        log("comment_skipped", { comment_id: commentId, reason: "own_comment" });
+        continue;
+      }
 
       // Ignorar replies aninhados (so responde primeiro nivel)
-      if (parent_id) continue;
+      if (parent_id) {
+        log("comment_skipped", { comment_id: commentId, reason: "nested_reply", username: from?.username });
+        continue;
+      }
 
       // Deduplicacao
       if (isDuplicate(commentId)) {
