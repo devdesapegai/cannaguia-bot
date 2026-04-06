@@ -16,6 +16,7 @@ export async function GET() {
     errors: stats.errors,
     last_webhook_ago_seconds: lastWebhookAgo ? Math.floor(lastWebhookAgo / 1000) : null,
     last_reply_ago_seconds: lastReplyAgo ? Math.floor(lastReplyAgo / 1000) : null,
+    categories: stats.categories,
     token_configured: !!process.env.INSTAGRAM_ACCESS_TOKEN,
     app_secret_configured: !!process.env.INSTAGRAM_APP_SECRET,
   });

@@ -2,13 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { after } from "next/server";
 import crypto from "crypto";
 import { filterComment } from "@/lib/filters";
-import { generateReply } from "@/lib/llm";
-import { replyToComment, hideComment, getMediaCaption } from "@/lib/instagram";
+import { generateReply, classify } from "@/lib/llm";
+import { replyToComment, hideComment, getMediaCaption, hasAlreadyReplied, likeComment } from "@/lib/instagram";
 import { isDuplicate, isOnCooldown } from "@/lib/dedup";
 import { canReply } from "@/lib/rate-limit";
 import { log } from "@/lib/logger";
-
-const OWN_USERNAME = "mariaconsultoracannabica";
+import { OWN_USERNAME } from "@/lib/constants";
+import "@/lib/env";
 
 export async function GET(req: NextRequest) {
   const searchParams = req.nextUrl.searchParams;
@@ -83,15 +83,15 @@ async function processWebhook(body: WebhookPayload) {
       if (!commentId || !text) continue;
 
       // Ignorar proprios comentarios
-      if (from?.username === OWN_USERNAME) return;
+      if (from?.username === OWN_USERNAME) continue;
 
       // Ignorar replies aninhados (so responde primeiro nivel)
-      if (parent_id) return;
+      if (parent_id) continue;
 
       // Deduplicacao
       if (isDuplicate(commentId)) {
         log("duplicate_skipped", { comment_id: commentId });
-        return;
+        continue;
       }
 
       // Cooldown por usuario por post
@@ -99,7 +99,7 @@ async function processWebhook(body: WebhookPayload) {
       const mediaId = media?.id || "unknown";
       if (isOnCooldown(userId, mediaId)) {
         log("cooldown_skipped", { comment_id: commentId, username: from?.username, media_id: mediaId });
-        return;
+        continue;
       }
 
       log("webhook_received", {
@@ -110,32 +110,42 @@ async function processWebhook(body: WebhookPayload) {
       });
 
       // Filtro de entrada
-      const filter = filterComment(text);
+      const filter = filterComment(text, from?.username);
       if (filter.action === "ignore") {
         log("comment_filtered", { comment_id: commentId, filter_action: "ignore", filter_reason: filter.reason });
-        return;
+        continue;
       }
       if (filter.action === "hide") {
         log("comment_filtered", { comment_id: commentId, filter_action: "hide", filter_reason: filter.reason });
         await hideComment(commentId);
-        return;
+        continue;
       }
 
       // Rate limiting
       if (!canReply()) {
         log("rate_limited", { comment_id: commentId });
-        return;
+        continue;
       }
+
+      // Check se ja respondeu (protege contra cold start em serverless)
+      if (await hasAlreadyReplied(commentId)) {
+        log("duplicate_skipped", { comment_id: commentId, reason: "already_replied_api" });
+        continue;
+      }
+
+      // Classificar comentario
+      const isHater = filter.action === "respond_hater";
+      const category = isHater ? "hater" : classify(text);
+      log("comment_classified", { comment_id: commentId, category });
 
       // Buscar caption do post
       const caption = media?.id ? await getMediaCaption(media.id) : "";
-      const isHater = filter.action === "respond_hater";
 
       // Gerar resposta
       const reply = await generateReply(text, caption, isHater);
       if (!reply) {
         log("reply_failed", { comment_id: commentId, error: "no reply generated" });
-        return;
+        continue;
       }
 
       log("reply_generated", { comment_id: commentId, reply: reply.slice(0, 100) });
@@ -144,6 +154,8 @@ async function processWebhook(body: WebhookPayload) {
       const success = await replyToComment(commentId, reply);
       if (success) {
         log("reply_posted", { comment_id: commentId, username: from?.username, reply: reply.slice(0, 100) });
+        // Curtir o comentario (exceto haters)
+        if (!isHater) await likeComment(commentId);
       } else {
         log("reply_failed", { comment_id: commentId, error: "instagram API error" });
       }

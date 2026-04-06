@@ -6,6 +6,7 @@ type EventType =
   | "reply_failed"
   | "signature_invalid"
   | "duplicate_skipped"
+  | "comment_classified"
   | "rate_limited"
   | "cooldown_skipped"
   | "error";
@@ -18,6 +19,8 @@ interface LogData {
   reply?: string;
   filter_action?: string;
   filter_reason?: string;
+  category?: string;
+  reason?: string;
   error?: string;
   processing_time_ms?: number;
   [key: string]: unknown;
@@ -32,6 +35,7 @@ export const stats = {
   last_webhook_at: 0,
   last_reply_at: 0,
   started_at: Date.now(),
+  categories: {} as Record<string, number>,
 };
 
 export function log(type: EventType, data?: LogData) {
@@ -42,11 +46,13 @@ export function log(type: EventType, data?: LogData) {
   };
 
   // Atualiza stats
-  if (type === "webhook_received") stats.webhooks_received++;
+  if (type === "webhook_received") { stats.webhooks_received++; stats.last_webhook_at = Date.now(); }
   if (type === "reply_posted") { stats.replies_sent++; stats.last_reply_at = Date.now(); }
   if (type === "reply_failed") stats.replies_failed++;
   if (type === "error") stats.errors++;
-  if (type === "webhook_received") stats.last_webhook_at = Date.now();
+  if (type === "comment_classified" && data?.category) {
+    stats.categories[data.category] = (stats.categories[data.category] || 0) + 1;
+  }
 
   console.log(JSON.stringify(event));
 }
