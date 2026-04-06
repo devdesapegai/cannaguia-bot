@@ -12,6 +12,18 @@ const pool = new pg.Pool({
   max: 5,
 });
 
+export async function getVideoContext(mediaId: string): Promise<string> {
+  try {
+    const { rows } = await pool.query(
+      "SELECT context_text FROM video_contexts WHERE media_id = $1",
+      [mediaId]
+    );
+    return rows[0]?.context_text || "";
+  } catch {
+    return "";
+  }
+}
+
 export { pool };
 
 export type VideoContext = {

@@ -10,6 +10,7 @@ import { isDuplicate, isOnCooldown } from "@/lib/dedup";
 import { canReply } from "@/lib/rate-limit";
 import { log } from "@/lib/logger";
 import { OWN_USERNAME } from "@/lib/constants";
+import { getVideoContext } from "@/lib/supabase";
 import "@/lib/env";
 
 export async function GET(req: NextRequest) {
@@ -161,9 +162,12 @@ async function processWebhook(body: WebhookPayload) {
         continue;
       }
 
-      // Buscar caption do post
+      // Buscar caption e contexto do video
       const isHater = filter.action === "respond_hater";
-      const caption = media?.id ? await getMediaCaption(media.id) : "";
+      const [caption, videoContext] = await Promise.all([
+        media?.id ? getMediaCaption(media.id) : Promise.resolve(""),
+        media?.id ? getVideoContext(media.id) : Promise.resolve(""),
+      ]);
       if (caption) {
         log("caption_fetched", { comment_id: commentId, media_id: mediaId, text: caption.slice(0, 100) });
       } else {
@@ -175,7 +179,8 @@ async function processWebhook(body: WebhookPayload) {
       await new Promise(r => setTimeout(r, delay));
 
       // Gerar resposta (LLM classifica + responde numa unica chamada)
-      const result = await generateReply(text, caption, isHater);
+      const fullCaption = videoContext ? `${caption}\n\nContexto do video: ${videoContext}` : caption;
+      const result = await generateReply(text, fullCaption, isHater);
       if (!result) {
         log("reply_failed", { comment_id: commentId, error: "no reply generated" });
         continue;
