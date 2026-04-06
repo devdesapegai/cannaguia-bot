@@ -24,6 +24,8 @@ export default function AdminPage() {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "with" | "without">("all");
   const [search, setSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [editTexts, setEditTexts] = useState<Record<string, string>>({});
   const [fullyLoaded, setFullyLoaded] = useState(false);
   const router = useRouter();
@@ -98,8 +100,16 @@ export default function AdminPage() {
         (editTexts[i.media_id] || "").toLowerCase().includes(q)
       );
     }
+    if (dateFrom) {
+      const from = new Date(dateFrom).getTime();
+      result = result.filter(i => new Date(i.timestamp).getTime() >= from);
+    }
+    if (dateTo) {
+      const to = new Date(dateTo + "T23:59:59").getTime();
+      result = result.filter(i => new Date(i.timestamp).getTime() <= to);
+    }
     return result;
-  }, [items, filter, search, editTexts]);
+  }, [items, filter, search, dateFrom, dateTo, editTexts]);
 
   const withCount = items.filter(i => i.has_context).length;
   const withoutCount = items.filter(i => !i.has_context).length;
@@ -163,17 +173,33 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* Search */}
-      <input
-        type="text"
-        value={search}
-        onChange={e => setSearch(e.target.value)}
-        placeholder={fullyLoaded ? "Buscar por caption, contexto ou ID..." : "Buscar (carregando posts...)"}
-        style={{
-          width: "100%", padding: 10, borderRadius: 6, marginBottom: 16,
-          border: "1px solid #d1d5db", fontSize: 14, boxSizing: "border-box"
-        }}
-      />
+      {/* Search + date filters */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+        <input
+          type="text"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder={fullyLoaded ? "Buscar por caption, contexto ou ID..." : "Buscar (carregando posts...)"}
+          style={{
+            flex: 1, minWidth: 200, padding: 10, borderRadius: 6,
+            border: "1px solid #d1d5db", fontSize: 14, boxSizing: "border-box"
+          }}
+        />
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <label style={{ fontSize: 13, color: "#666" }}>De:</label>
+          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+            style={{ padding: 8, borderRadius: 6, border: "1px solid #d1d5db", fontSize: 13 }} />
+          <label style={{ fontSize: 13, color: "#666" }}>Ate:</label>
+          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+            style={{ padding: 8, borderRadius: 6, border: "1px solid #d1d5db", fontSize: 13 }} />
+          {(dateFrom || dateTo) && (
+            <button onClick={() => { setDateFrom(""); setDateTo(""); }}
+              style={{ padding: "6px 10px", background: "#e5e7eb", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
+              Limpar
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* Filter pills */}
       <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
