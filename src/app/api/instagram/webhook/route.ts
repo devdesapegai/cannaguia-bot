@@ -148,8 +148,9 @@ async function processWebhook(body: WebhookPayload) {
       log("comment_classified", { comment_id: commentId, category: result.category });
       log("reply_generated", { comment_id: commentId, reply: result.reply.slice(0, 100) });
 
-      // Postar resposta
-      const success = await replyToComment(commentId, result.reply);
+      // Postar resposta (marca o usuario)
+      const mention = from?.username ? `@${from.username} ` : "";
+      const success = await replyToComment(commentId, mention + result.reply);
       if (success) {
         log("reply_posted", { comment_id: commentId, username: from?.username, reply: result.reply.slice(0, 100) });
         // Curtir o comentario (exceto haters)
