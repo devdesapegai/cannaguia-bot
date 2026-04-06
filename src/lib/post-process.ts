@@ -34,3 +34,34 @@ export function postProcess(text: string): string {
 
   return result;
 }
+
+export function postProcessDm(text: string): string {
+  let result = text;
+
+  // DM permite ate 3 frases
+  const sentences = result.split(SENTENCE_SPLIT).filter(Boolean);
+  if (sentences.length > 3) {
+    result = sentences.slice(0, 3).join(" ");
+  }
+
+  // Limitar emojis a 3
+  const emojis = result.match(EMOJI_REGEX) || [];
+  if (emojis.length > MAX_EMOJIS) {
+    let count = 0;
+    result = result.replace(EMOJI_REGEX, (match) => {
+      count++;
+      return count <= MAX_EMOJIS ? match : "";
+    });
+  }
+
+  // Remover aspas ao redor
+  result = result.replace(/^["']|["']$/g, "");
+
+  // DM permite ate 250 chars
+  result = result.trim();
+  if (result.length > 250) {
+    result = result.slice(0, 250).replace(/\s+\S*$/, "").trim();
+  }
+
+  return result;
+}

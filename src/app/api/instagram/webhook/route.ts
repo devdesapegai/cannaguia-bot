@@ -194,10 +194,6 @@ async function processMessaging(entry: WebhookEntry) {
       continue;
     }
 
-    // Delay aleatorio (10-30s pra DM - mais rapido que comentario)
-    const delay = Math.floor(Math.random() * 20 + 10) * 1000;
-    await new Promise(r => setTimeout(r, delay));
-
     // Gerar resposta
     const reply = await generateDmReply(text);
     if (!reply) {
