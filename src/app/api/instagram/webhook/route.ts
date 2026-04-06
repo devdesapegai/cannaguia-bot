@@ -15,36 +15,57 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 }
 
+export const maxDuration = 60;
+
 export async function POST(req: NextRequest) {
+  console.log("[webhook] POST received");
   try {
     const body = await req.json();
-    processWebhook(body).catch((err) => console.error("[webhook] Processing error:", err));
+    console.log("[webhook] Body parsed:", JSON.stringify(body).slice(0, 500));
+    await processWebhook(body);
+    console.log("[webhook] Processing complete");
     return NextResponse.json({ status: "ok" }, { status: 200 });
   } catch (error) {
-    console.error("[webhook] Parse error:", error);
+    console.error("[webhook] Error:", error);
     return NextResponse.json({ error: "Bad request" }, { status: 400 });
   }
 }
 
 async function processWebhook(body: WebhookPayload) {
-  if (body.object !== "instagram") return;
+  console.log("[webhook] Object:", body.object);
+  if (body.object !== "instagram") { console.log("[webhook] Not instagram, skipping"); return; }
+
   for (const entry of body.entry || []) {
+    console.log("[webhook] Entry:", entry.id);
     for (const change of entry.changes || []) {
-      if (change.field !== "comments") continue;
+      console.log("[webhook] Field:", change.field);
+      if (change.field !== "comments") { console.log("[webhook] Not comments, skipping"); continue; }
+
       const { id: commentId, text, media } = change.value;
-      if (!commentId || !text) continue;
+      if (!commentId || !text) { console.log("[webhook] No commentId or text"); continue; }
+
       console.log(`[webhook] Comment: "${text}" (${commentId})`);
+
       const filter = filterComment(text);
-      if (filter.action === "ignore") { console.log(`[webhook] Ignored: ${filter.reason}`); continue; }
-      if (filter.action === "hide") { console.log(`[webhook] Hiding spam: ${filter.reason}`); await hideComment(commentId); continue; }
+      console.log("[webhook] Filter result:", JSON.stringify(filter));
+
+      if (filter.action === "ignore") { console.log(`[webhook] Ignored: ${filter.reason}`); return; }
+      if (filter.action === "hide") { await hideComment(commentId); return; }
+
+      console.log("[webhook] Getting caption...");
       const caption = media?.id ? await getMediaCaption(media.id) : "";
-      const delay = 30000 + Math.random() * 30000;
-      await new Promise((resolve) => setTimeout(resolve, delay));
+      console.log("[webhook] Caption:", caption.slice(0, 100));
+
       const isHater = filter.action === "respond_hater";
+      console.log("[webhook] Generating reply...");
       const reply = await generateReply(text, caption, isHater);
-      if (!reply) { console.log("[webhook] No reply generated"); continue; }
+      console.log("[webhook] Reply:", reply);
+
+      if (!reply) { console.log("[webhook] No reply generated"); return; }
+
+      console.log("[webhook] Posting reply...");
       const success = await replyToComment(commentId, reply);
-      console.log(`[webhook] ${success ? "Replied" : "Failed"}: "${reply.slice(0, 50)}..."`);
+      console.log(`[webhook] ${success ? "SUCCESS" : "FAILED"}`);
     }
   }
 }
