@@ -79,6 +79,11 @@ export async function POST(req: NextRequest) {
 async function processWebhook(body: WebhookPayload) {
   if (body.object !== "instagram") return;
 
+  const entryCount = body.entry?.length || 0;
+  const totalChanges = (body.entry || []).reduce((n, e) => n + (e.changes?.length || 0), 0);
+  const totalMsgs = (body.entry || []).reduce((n, e) => n + (e.messaging?.length || 0), 0);
+  log("processing_started", { text: `entries=${entryCount} changes=${totalChanges} msgs=${totalMsgs}` });
+
   for (const entry of body.entry || []) {
     // Processar DMs
     await processMessaging(entry);
