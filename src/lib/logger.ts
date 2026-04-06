@@ -1,6 +1,7 @@
 type EventType =
   | "webhook_received"
   | "comment_skipped"
+  | "nested_reply_accepted"
   | "comment_filtered"
   | "reply_generated"
   | "reply_posted"

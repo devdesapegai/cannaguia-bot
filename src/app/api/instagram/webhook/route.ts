@@ -102,10 +102,13 @@ async function processWebhook(body: WebhookPayload) {
         continue;
       }
 
-      // Ignorar replies aninhados (so responde primeiro nivel)
+      // Replies aninhados: so responde se marcou @Maria
       if (parent_id) {
-        log("comment_skipped", { comment_id: commentId, reason: "nested_reply", username: from?.username });
-        continue;
+        if (!text.toLowerCase().includes(`@${OWN_USERNAME}`)) {
+          log("comment_skipped", { comment_id: commentId, reason: "nested_reply_no_mention", username: from?.username });
+          continue;
+        }
+        log("nested_reply_accepted", { comment_id: commentId, username: from?.username });
       }
 
       // Deduplicacao
