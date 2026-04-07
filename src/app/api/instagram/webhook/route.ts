@@ -186,12 +186,7 @@ async function processWebhook(body: WebhookPayload) {
         continue;
       }
 
-      // Night mode: pula 80% dos comentarios, MAS nunca pula se mencionou @bot
-      if (!mentionedBot && shouldSkipNight()) {
-        log("night_skipped", { comment_id: commentId });
-        recordStat("night_skipped");
-        continue;
-      }
+      // Night mode: apenas adapta o tom (via getTimeContext no llm.ts), nao pula comentarios
 
       // Rate limiting
       if (!await canReply()) {
