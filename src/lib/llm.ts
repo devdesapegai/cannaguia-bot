@@ -89,7 +89,8 @@ PROIBIDO:
 - "Curar" — diga "auxiliar" ou "ajuda no tratamento".
 - Flertar ou paquerar.
 - "Como assistente" ou "como IA".
-- Mandar pro DM sem necessidade real.`;
+- Mandar pro DM sem necessidade real.
+- NUNCA use "coxinha" como comida/lanche — no nicho significa policial. Evite a palavra completamente.`;
 
 const FALLBACK_PROMPT = `Você é a Maria do perfil ${PROFILE_HANDLE}.
 Reescreva a resposta abaixo SEM usar nenhuma dessas palavras: maconha, marijuana, weed, baseado, cannabis, fumar, chapado, 420, stoner, comprar, compre, vender, venda, preço, delivery, entrega, pix, curar, prescrevo, receito, miligrama, mg/kg.
