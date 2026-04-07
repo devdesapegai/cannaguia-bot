@@ -87,6 +87,7 @@ REGRAS:
 - Use o contexto do post (caption) pra entender o tema geral.
 - NUNCA mencione dias da semana (segunda, terça, domingo, etc), datas ou horários na sua resposta. A pessoa pode estar comentando dias depois do post. Responda sobre o TEMA sem citar o dia.
 - Se houver CONTEXTO DO VIDEO, use como base principal pra responder. Esse contexto descreve o que a Maria fala no video — use pra dar respostas precisas e relevantes ao conteudo real do post.
+- Use os COMENTARIOS RECENTES DO POST pra entender o contexto da conversa. Responda o comentário final levando em conta o que já foi discutido. NÃO responda aos outros comentários — são só pra contexto. Se alguém já fez a mesma pergunta e foi respondida, não repita a resposta.
 
 PROIBIDO:
 - Compra, venda, preço, delivery.
@@ -118,8 +119,8 @@ function parseResponse(raw: string): { category: CommentCategory; reply: string 
   return { category: "geral", reply: cleaned || raw.trim() };
 }
 
-function buildRecentContext(): string {
-  const recent = getRecentReplies();
+async function buildRecentContext(): Promise<string> {
+  const recent = await getRecentReplies();
   if (recent.length === 0) return "";
   return `\nRespostas recentes (NAO repita nenhuma dessas):\n${recent.map((r, i) => `${i + 1}. ${r}`).join("\n")}`;
 }
@@ -129,15 +130,22 @@ export async function generateReply(
   caption: string,
   isHater: boolean,
   videoContext?: string,
+  recentComments?: Array<{ username: string; text: string }>,
 ): Promise<{ reply: string; category: CommentCategory } | null> {
   try {
-    const systemPrompt = SYSTEM_PROMPT + buildRecentContext();
+    const systemPrompt = SYSTEM_PROMPT + await buildRecentContext();
 
     let userMessage = "";
     const shortCaption = summarizeCaption(caption);
     if (shortCaption) userMessage += `Post: "${shortCaption}"\n`;
     if (videoContext) userMessage += `Contexto do video: ${videoContext}\n`;
-    userMessage += `Comentario: "${comment}"`;
+    if (recentComments && recentComments.length > 0) {
+      userMessage += `Comentarios recentes no post:\n`;
+      for (const c of recentComments) {
+        userMessage += `- @${c.username}: "${c.text}"\n`;
+      }
+    }
+    userMessage += `Comentario (responda este): "${comment}"`;
     if (isHater) userMessage += `\n(comentario ofensivo — responda firme e tranquila)`;
 
     const response = await client.responses.create({
@@ -155,7 +163,7 @@ export async function generateReply(
     const processed = postProcess(reply);
     const { safe, flagged } = validateOutput(processed);
     if (safe) {
-      addRecentReply(processed);
+      await addRecentReply(processed);
       return { reply: processed, category };
     }
 
@@ -190,7 +198,7 @@ async function rewriteFallback(originalText: string, attempt = 0): Promise<strin
     const processed = postProcess(text);
     const { safe, flagged } = validateOutput(processed);
     if (safe) {
-      addRecentReply(processed);
+      await addRecentReply(processed);
       return processed;
     }
 

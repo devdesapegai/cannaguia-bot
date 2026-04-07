@@ -1,31 +1,56 @@
+const mockQuery = jest.fn();
+
+jest.mock("../supabase", () => ({
+  pool: { query: mockQuery },
+}));
+
 import { isDuplicate, isOnCooldown } from "../dedup";
 
+beforeEach(() => {
+  mockQuery.mockReset();
+});
+
 describe("isDuplicate", () => {
-  it("retorna false na primeira vez e true na segunda", () => {
-    const id = `test-dedup-${Date.now()}`;
-    expect(isDuplicate(id)).toBe(false);
-    expect(isDuplicate(id)).toBe(true);
+  it("retorna false quando INSERT retorna 1 row (novo)", async () => {
+    mockQuery.mockResolvedValue({ rowCount: 1 });
+    expect(await isDuplicate("comment-1")).toBe(false);
+    expect(mockQuery).toHaveBeenCalledWith(
+      expect.stringContaining("INSERT INTO processed_comments"),
+      ["comment-1"],
+    );
   });
 
-  it("ids diferentes nao colidem", () => {
-    const id1 = `test-a-${Date.now()}`;
-    const id2 = `test-b-${Date.now()}`;
-    expect(isDuplicate(id1)).toBe(false);
-    expect(isDuplicate(id2)).toBe(false);
+  it("retorna true quando INSERT retorna 0 rows (ja existia)", async () => {
+    mockQuery.mockResolvedValue({ rowCount: 0 });
+    expect(await isDuplicate("comment-1")).toBe(true);
+  });
+
+  it("retorna false em caso de erro (fail-open)", async () => {
+    mockQuery.mockRejectedValue(new Error("db error"));
+    expect(await isDuplicate("comment-1")).toBe(false);
   });
 });
 
 describe("isOnCooldown", () => {
-  it("retorna false na primeira vez e true na segunda pra mesmo user+media", () => {
-    const userId = `user-${Date.now()}`;
-    const mediaId = `media-${Date.now()}`;
-    expect(isOnCooldown(userId, mediaId)).toBe(false);
-    expect(isOnCooldown(userId, mediaId)).toBe(true);
+  it("retorna false quando nao tem registro (novo)", async () => {
+    // SELECT retorna vazio, INSERT acontece
+    mockQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rowCount: 1 });
+    expect(await isOnCooldown("user-1", "media-1")).toBe(false);
   });
 
-  it("mesmo user em media diferente nao tem cooldown", () => {
-    const userId = `user-cd-${Date.now()}`;
-    expect(isOnCooldown(userId, "media-1")).toBe(false);
-    expect(isOnCooldown(userId, "media-2")).toBe(false);
+  it("retorna true quando tem registro recente", async () => {
+    const recent = new Date().toISOString();
+    mockQuery.mockResolvedValueOnce({ rows: [{ created_at: recent }] });
+    expect(await isOnCooldown("user-1", "media-1")).toBe(true);
+  });
+
+  it("retorna false quando registro expirou (>30min)", async () => {
+    const expired = new Date(Date.now() - 31 * 60 * 1000).toISOString();
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ created_at: expired }] })
+      .mockResolvedValueOnce({ rowCount: 1 }); // UPDATE
+    expect(await isOnCooldown("user-1", "media-1")).toBe(false);
   });
 });

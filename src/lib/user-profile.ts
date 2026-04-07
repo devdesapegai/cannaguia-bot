@@ -1,3 +1,5 @@
+import { pool } from "./supabase";
+
 export interface UserProfile {
   userId: string;
   name: string | null;
@@ -14,43 +16,60 @@ export interface UserProfile {
   updatedAt: number;
 }
 
-const profiles = new Map<string, UserProfile>();
+function defaultProfile(userId: string): UserProfile {
+  return {
+    userId,
+    name: null,
+    gender: null,
+    age: null,
+    weight: null,
+    conditions: [],
+    currentMedications: [],
+    cannabisUse: null,
+    cannabisProducts: [],
+    interests: [],
+    stage: "curioso",
+    whatsappOffered: false,
+    updatedAt: Date.now(),
+  };
+}
 
-export function getProfile(userId: string): UserProfile {
-  let profile = profiles.get(userId);
-  if (!profile) {
-    profile = {
-      userId,
-      name: null,
-      gender: null,
-      age: null,
-      weight: null,
-      conditions: [],
-      currentMedications: [],
-      cannabisUse: null,
-      cannabisProducts: [],
-      interests: [],
-      stage: "curioso",
-      whatsappOffered: false,
-      updatedAt: Date.now(),
-    };
-    profiles.set(userId, profile);
+export async function getProfile(userId: string): Promise<UserProfile> {
+  try {
+    const { rows } = await pool.query(
+      `SELECT profile_data FROM user_profiles WHERE user_id = $1`,
+      [userId],
+    );
+    if (rows.length > 0 && rows[0].profile_data) {
+      return { ...defaultProfile(userId), ...rows[0].profile_data, userId };
+    }
+  } catch {}
+  return defaultProfile(userId);
+}
+
+export async function updateProfile(userId: string, updates: Partial<UserProfile>): Promise<void> {
+  try {
+    const current = await getProfile(userId);
+    const merged = { ...current, ...updates, updatedAt: Date.now() };
+    await pool.query(
+      `INSERT INTO user_profiles (user_id, profile_data)
+       VALUES ($1, $2::jsonb)
+       ON CONFLICT (user_id) DO UPDATE SET
+         profile_data = $2::jsonb,
+         updated_at = now()`,
+      [userId, JSON.stringify(merged)],
+    );
+  } catch (e) {
+    console.error("[user-profile] updateProfile error:", e);
   }
-  return profile;
 }
 
-export function updateProfile(userId: string, updates: Partial<UserProfile>) {
-  const profile = getProfile(userId);
-  Object.assign(profile, updates, { updatedAt: Date.now() });
-  profiles.set(userId, profile);
+export async function markWhatsAppOffered(userId: string): Promise<void> {
+  await updateProfile(userId, { whatsappOffered: true });
 }
 
-export function markWhatsAppOffered(userId: string) {
-  updateProfile(userId, { whatsappOffered: true });
-}
-
-export function profileSummary(userId: string): string {
-  const p = getProfile(userId);
+export async function profileSummary(userId: string): Promise<string> {
+  const p = await getProfile(userId);
   const parts: string[] = [];
   if (p.name) parts.push(`Nome: ${p.name}`);
   if (p.gender) parts.push(`Gênero: ${p.gender === "f" ? "feminino" : "masculino"}`);
@@ -78,8 +97,8 @@ function addUnique(arr: string[], value: string) {
   if (!arr.includes(value)) arr.push(value);
 }
 
-export function extractProfileFromMessage(userId: string, message: string) {
-  const profile = getProfile(userId);
+export async function extractProfileFromMessage(userId: string, message: string): Promise<void> {
+  const profile = await getProfile(userId);
   const lower = message.toLowerCase();
 
   // Nome
@@ -89,7 +108,6 @@ export function extractProfileFromMessage(userId: string, message: string) {
   // Genero
   if (/\b(sou mulher|sou m[aã]e|gestante|gr[aá]vida|minha filha)\b/i.test(message)) profile.gender = "f";
   if (/\b(sou homem|sou pai|meu filho)\b/i.test(message)) profile.gender = "m";
-  // Pistas indiretas
   if (!profile.gender && /\b(obrigada|cansada|animada|preocupada)\b/i.test(message)) profile.gender = "f";
   if (!profile.gender && /\b(obrigado|cansado|animado|preocupado)\b/i.test(message)) profile.gender = "m";
 
@@ -162,6 +180,5 @@ export function extractProfileFromMessage(userId: string, message: string) {
     profile.stage = "buscando_info";
   }
 
-  profile.updatedAt = Date.now();
-  profiles.set(userId, profile);
+  await updateProfile(userId, profile);
 }

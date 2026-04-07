@@ -3,14 +3,14 @@ import { after } from "next/server";
 import crypto from "crypto";
 import { filterComment } from "@/lib/filters";
 import { generateReply } from "@/lib/llm";
-import { replyToComment, hideComment, getMediaCaption, hasAlreadyReplied } from "@/lib/instagram";
+import { replyToComment, hideComment, getMediaCaption, getMediaComments, hasAlreadyReplied } from "@/lib/instagram";
 import { generateDmReply, sendDm, sendDmWithWhatsApp } from "@/lib/dm";
 import { generateMentionReply, commentOnMedia, getMentionMediaInfo } from "@/lib/mentions";
 import { isDuplicate, isOnCooldown } from "@/lib/dedup";
 import { canReply } from "@/lib/rate-limit";
 import { log } from "@/lib/logger";
 import { OWN_USERNAME } from "@/lib/constants";
-import { getVideoContext, saveFailedReply } from "@/lib/supabase";
+import { getVideoContext, saveFailedReply, logResponse, recordStat } from "@/lib/supabase";
 import "@/lib/env";
 
 export async function GET(req: NextRequest) {
@@ -105,6 +105,7 @@ async function processWebhook(body: WebhookPayload) {
   const totalChanges = (body.entry || []).reduce((n, e) => n + (e.changes?.length || 0), 0);
   const totalMsgs = (body.entry || []).reduce((n, e) => n + (e.messaging?.length || 0), 0);
   log("processing_started", { text: `entries=${entryCount} changes=${totalChanges} msgs=${totalMsgs}` });
+  recordStat("webhook_received");
 
   for (const entry of body.entry || []) {
     // Processar DMs
@@ -139,7 +140,7 @@ async function processWebhook(body: WebhookPayload) {
       }
 
       // Deduplicacao
-      if (isDuplicate(commentId)) {
+      if (await isDuplicate(commentId)) {
         log("duplicate_skipped", { comment_id: commentId });
         continue;
       }
@@ -147,7 +148,7 @@ async function processWebhook(body: WebhookPayload) {
       // Cooldown por usuario por post
       const userId = from?.id || "unknown";
       const mediaId = media?.id || "unknown";
-      if (isOnCooldown(userId, mediaId)) {
+      if (await isOnCooldown(userId, mediaId)) {
         log("cooldown_skipped", { comment_id: commentId, username: from?.username, media_id: mediaId });
         continue;
       }
@@ -172,7 +173,7 @@ async function processWebhook(body: WebhookPayload) {
       }
 
       // Rate limiting
-      if (!canReply()) {
+      if (!await canReply()) {
         log("rate_limited", { comment_id: commentId });
         continue;
       }
@@ -185,9 +186,10 @@ async function processWebhook(body: WebhookPayload) {
 
       // Buscar caption e contexto do video
       const isHater = filter.action === "respond_hater";
-      const [caption, videoContext] = await Promise.all([
+      const [caption, videoContext, recentComments] = await Promise.all([
         media?.id ? getMediaCaption(media.id) : Promise.resolve(""),
         media?.id ? getVideoContext(media.id) : Promise.resolve(""),
+        media?.id ? getMediaComments(media.id, commentId) : Promise.resolve([]),
       ]);
       if (caption) {
         log("caption_fetched", { comment_id: commentId, media_id: mediaId, text: caption.slice(0, 100) });
@@ -200,7 +202,7 @@ async function processWebhook(body: WebhookPayload) {
       await new Promise(r => setTimeout(r, delay));
 
       // Gerar resposta (LLM classifica + responde numa unica chamada)
-      const result = await generateReply(text, caption, isHater, videoContext);
+      const result = await generateReply(text, caption, isHater, videoContext, recentComments);
       if (!result) {
         log("reply_failed", { comment_id: commentId, error: "no reply generated" });
         continue;
@@ -214,9 +216,12 @@ async function processWebhook(body: WebhookPayload) {
       const success = await replyToComment(commentId, mention + result.reply);
       if (success) {
         log("reply_posted", { comment_id: commentId, username: from?.username, reply: result.reply.slice(0, 100) });
+        logResponse({ commentId, originalText: text, botReply: result.reply, category: result.category, mediaId, username: from?.username, replyType: "comment" });
+        recordStat("reply_sent", result.category);
       } else {
         log("reply_failed", { comment_id: commentId, error: "instagram API error, saving to retry queue" });
         await saveFailedReply(commentId, result.reply, from?.username, "comment", mediaId);
+        recordStat("reply_failed");
       }
     }
   }
@@ -231,7 +236,7 @@ async function processMentions(entry: WebhookEntry) {
 
     // Deduplicacao
     const mentionKey = `mention_${mediaId}`;
-    if (isDuplicate(mentionKey)) {
+    if (await isDuplicate(mentionKey)) {
       log("duplicate_skipped", { comment_id: mentionKey });
       continue;
     }
@@ -239,7 +244,7 @@ async function processMentions(entry: WebhookEntry) {
     log("mention_received", { media_id: mediaId });
 
     // Rate limiting
-    if (!canReply()) {
+    if (!await canReply()) {
       log("rate_limited", { comment_id: mentionKey });
       continue;
     }
@@ -268,8 +273,11 @@ async function processMentions(entry: WebhookEntry) {
     const success = await commentOnMedia(mediaId, reply);
     if (success) {
       log("mention_replied", { media_id: mediaId, username, reply: reply.slice(0, 100) });
+      logResponse({ originalText: caption, botReply: reply, mediaId, username, replyType: "mention" });
+      recordStat("reply_sent");
     } else {
       log("reply_failed", { comment_id: mentionKey, error: "comment on mention failed" });
+      recordStat("reply_failed");
     }
   }
 }
@@ -285,7 +293,7 @@ async function processMessaging(entry: WebhookEntry) {
 
     // Deduplicacao
     const msgId = msg.message?.mid || `dm_${senderId}_${Date.now()}`;
-    if (isDuplicate(msgId)) {
+    if (await isDuplicate(msgId)) {
       log("duplicate_skipped", { comment_id: msgId });
       continue;
     }
@@ -293,7 +301,7 @@ async function processMessaging(entry: WebhookEntry) {
     log("dm_received", { comment_id: msgId, username: senderId, text: text.slice(0, 100) });
 
     // Rate limiting
-    if (!canReply()) {
+    if (!await canReply()) {
       log("rate_limited", { comment_id: msgId });
       continue;
     }
@@ -314,8 +322,11 @@ async function processMessaging(entry: WebhookEntry) {
 
     if (success) {
       log("dm_sent", { comment_id: msgId, username: senderId, reply: result.reply.slice(0, 100) });
+      logResponse({ commentId: msgId, originalText: text, botReply: result.reply, username: senderId, replyType: "dm" });
+      recordStat("reply_sent");
     } else {
       log("reply_failed", { comment_id: msgId, error: "dm send error" });
+      recordStat("reply_failed");
     }
   }
 }

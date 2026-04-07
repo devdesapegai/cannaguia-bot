@@ -1,48 +1,61 @@
+import { pool } from "./supabase";
+
 const MAX_MESSAGES = 10;
-const MAX_USERS = 100;
-const TTL = 60 * 60 * 1000; // 1 hora
+const TTL_MS = 60 * 60 * 1000; // 1 hora
 
-interface ConversationEntry {
-  messages: Array<{ role: "user" | "assistant"; text: string }>;
-  lastActivity: number;
-}
+type Message = { role: "user" | "assistant"; text: string };
 
-const conversations = new Map<string, ConversationEntry>();
+export async function addMessage(userId: string, role: "user" | "assistant", text: string): Promise<void> {
+  try {
+    const newMsg = JSON.stringify([{ role, text }]);
 
-function cleanup() {
-  const now = Date.now();
-  for (const [key, entry] of conversations) {
-    if (now - entry.lastActivity > TTL) conversations.delete(key);
+    // Upsert: insere ou append ao array existente
+    const { rows } = await pool.query(
+      `INSERT INTO dm_conversations (user_id, messages, last_activity)
+       VALUES ($1, $2::jsonb, now())
+       ON CONFLICT (user_id) DO UPDATE SET
+         messages = dm_conversations.messages || $2::jsonb,
+         last_activity = now()
+       RETURNING messages`,
+      [userId, newMsg],
+    );
+
+    // Trim pra MAX_MESSAGES se necessario
+    const msgs = rows[0]?.messages || [];
+    if (msgs.length > MAX_MESSAGES) {
+      await pool.query(
+        `UPDATE dm_conversations SET messages = $2::jsonb WHERE user_id = $1`,
+        [userId, JSON.stringify(msgs.slice(-MAX_MESSAGES))],
+      );
+    }
+  } catch (e) {
+    console.error("[dm-history] addMessage error:", e);
   }
 }
 
-export function addMessage(userId: string, role: "user" | "assistant", text: string) {
-  if (conversations.size > MAX_USERS) cleanup();
+export async function getHistory(userId: string): Promise<Message[]> {
+  try {
+    const { rows } = await pool.query(
+      `SELECT messages, last_activity FROM dm_conversations WHERE user_id = $1`,
+      [userId],
+    );
 
-  let entry = conversations.get(userId);
-  if (!entry) {
-    entry = { messages: [], lastActivity: Date.now() };
-    conversations.set(userId, entry);
-  }
+    if (rows.length === 0) return [];
 
-  entry.messages.push({ role, text });
-  entry.lastActivity = Date.now();
+    const lastActivity = new Date(rows[0].last_activity).getTime();
+    if (Date.now() - lastActivity > TTL_MS) {
+      // Expirou — limpa
+      await pool.query(`DELETE FROM dm_conversations WHERE user_id = $1`, [userId]);
+      return [];
+    }
 
-  if (entry.messages.length > MAX_MESSAGES) {
-    entry.messages = entry.messages.slice(-MAX_MESSAGES);
-  }
-}
-
-export function getHistory(userId: string): Array<{ role: "user" | "assistant"; text: string }> {
-  const entry = conversations.get(userId);
-  if (!entry) return [];
-  if (Date.now() - entry.lastActivity > TTL) {
-    conversations.delete(userId);
+    return rows[0].messages || [];
+  } catch {
     return [];
   }
-  return [...entry.messages];
 }
 
-export function getMessageCount(userId: string): number {
-  return getHistory(userId).filter(m => m.role === "user").length;
+export async function getMessageCount(userId: string): Promise<number> {
+  const history = await getHistory(userId);
+  return history.filter(m => m.role === "user").length;
 }

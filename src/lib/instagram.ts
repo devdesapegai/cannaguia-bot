@@ -6,6 +6,9 @@ const GRAPH_URL = "https://graph.instagram.com/v21.0";
 const captionCache = new Map<string, { caption: string; ts: number }>();
 const CAPTION_CACHE_TTL = 60 * 60 * 1000; // 1 hora
 
+const commentsCache = new Map<string, { comments: Array<{ id: string; username: string; text: string }>; ts: number }>();
+const COMMENTS_CACHE_TTL = 5 * 60 * 1000; // 5 minutos
+
 function authHeaders(token: string): Record<string, string> {
   return {
     "Authorization": `Bearer ${token}`,
@@ -78,6 +81,47 @@ export async function hideComment(commentId: string): Promise<boolean> {
   });
 
   return res.ok;
+}
+
+export async function getMediaComments(
+  mediaId: string,
+  excludeCommentId?: string,
+): Promise<Array<{ username: string; text: string }>> {
+  const token = process.env.INSTAGRAM_ACCESS_TOKEN;
+  if (!token) return [];
+
+  const cached = commentsCache.get(mediaId);
+  if (cached && Date.now() - cached.ts < COMMENTS_CACHE_TTL) {
+    if (excludeCommentId) {
+      return cached.comments.filter(c => c.id !== excludeCommentId);
+    }
+    return cached.comments;
+  }
+
+  try {
+    const res = await fetchWithRetry(
+      `${GRAPH_URL}/${mediaId}/comments?fields=id,text,username,timestamp&limit=10`,
+      { headers: { "Authorization": `Bearer ${token}` } },
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    const allComments: Array<{ id: string; username: string; text: string }> = (data.data || [])
+      .filter((c: { username?: string }) => c.username !== OWN_USERNAME)
+      .map((c: { id?: string; username?: string; text?: string }) => ({
+        id: c.id || "",
+        username: c.username || "",
+        text: c.text || "",
+      }));
+
+    commentsCache.set(mediaId, { comments: allComments, ts: Date.now() });
+
+    if (excludeCommentId) {
+      return allComments.filter(c => c.id !== excludeCommentId);
+    }
+    return allComments;
+  } catch {
+    return [];
+  }
 }
 
 export async function getMediaCaption(mediaId: string): Promise<string> {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPendingRetries, markRetryAttempt, cleanupOldRetries } from "@/lib/supabase";
+import { getPendingRetries, markRetryAttempt, cleanupOldRetries, cleanupExpiredState } from "@/lib/supabase";
 import { replyToComment } from "@/lib/instagram";
 import { log } from "@/lib/logger";
 
@@ -13,6 +13,7 @@ export async function GET(req: NextRequest) {
   const pending = await getPendingRetries();
   if (pending.length === 0) {
     await cleanupOldRetries();
+    await cleanupExpiredState();
     return NextResponse.json({ retried: 0 });
   }
 
@@ -43,5 +44,6 @@ export async function GET(req: NextRequest) {
   }
 
   await cleanupOldRetries();
+  await cleanupExpiredState();
   return NextResponse.json({ retried: success, failed, pending: pending.length });
 }

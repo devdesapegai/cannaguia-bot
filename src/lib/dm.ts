@@ -98,22 +98,22 @@ export interface DmResult {
 
 export async function generateDmReply(message: string, senderId: string): Promise<DmResult | null> {
   // Registrar mensagem e extrair perfil
-  addMessage(senderId, "user", message);
-  extractProfileFromMessage(senderId, message);
+  await addMessage(senderId, "user", message);
+  await extractProfileFromMessage(senderId, message);
 
-  const profile = getProfile(senderId);
+  const profile = await getProfile(senderId);
 
   // Se a pessoa pede WhatsApp direto
   if (WHATSAPP_DIRECT_REGEX.test(message)) {
     const reply = "Claro! Me chama lá no WhatsApp que a gente conversa melhor 💚";
-    addMessage(senderId, "assistant", reply);
-    markWhatsAppOffered(senderId);
+    await addMessage(senderId, "assistant", reply);
+    await markWhatsAppOffered(senderId);
     return { reply, whatsapp: true };
   }
 
   try {
     // Montar historico da conversa
-    const history = getHistory(senderId);
+    const history = await getHistory(senderId);
     const input: Array<{ role: "user" | "assistant"; content: string }> = [];
 
     for (const msg of history.slice(0, -1)) {
@@ -122,10 +122,10 @@ export async function generateDmReply(message: string, senderId: string): Promis
     input.push({ role: "user", content: message });
 
     // Injetar perfil e contexto no prompt
-    const msgCount = getMessageCount(senderId);
+    const msgCount = await getMessageCount(senderId);
     let systemPrompt = DM_PROMPT;
 
-    const summary = profileSummary(senderId);
+    const summary = await profileSummary(senderId);
     if (summary) {
       systemPrompt += `\n\nPERFIL DA PESSOA:\n${summary}`;
     }
@@ -160,8 +160,8 @@ export async function generateDmReply(message: string, senderId: string): Promis
     }
 
     // Registrar resposta e marcar whatsapp se oferecido
-    addMessage(senderId, "assistant", processed);
-    if (whatsapp) markWhatsAppOffered(senderId);
+    await addMessage(senderId, "assistant", processed);
+    if (whatsapp) await markWhatsAppOffered(senderId);
 
     return { reply: processed, whatsapp };
   } catch (error) {

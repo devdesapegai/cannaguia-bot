@@ -95,6 +95,79 @@ export async function cleanupOldRetries(): Promise<void> {
   } catch {}
 }
 
+export async function cleanupExpiredState(): Promise<void> {
+  try {
+    await pool.query(`DELETE FROM processed_comments WHERE created_at < now() - interval '2 hours'`);
+    await pool.query(`DELETE FROM user_cooldowns WHERE created_at < now() - interval '1 hour'`);
+    await pool.query(`DELETE FROM dm_conversations WHERE last_activity < now() - interval '2 hours'`);
+    await pool.query(`DELETE FROM recent_replies WHERE created_at < now() - interval '3 hours'`);
+  } catch (e) {
+    console.error("[cleanup] error:", e);
+  }
+}
+
+export async function logResponse(params: {
+  commentId?: string;
+  originalText: string;
+  botReply: string;
+  category?: string;
+  mediaId?: string;
+  username?: string;
+  replyType: "comment" | "dm" | "mention";
+}): Promise<void> {
+  try {
+    await pool.query(
+      `INSERT INTO response_log (comment_id, original_text, bot_reply, category, media_id, username, reply_type)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        params.commentId || null,
+        params.originalText,
+        params.botReply,
+        params.category || null,
+        params.mediaId || null,
+        params.username || null,
+        params.replyType,
+      ],
+    );
+  } catch (e) {
+    console.error("[response_log] error:", e);
+  }
+}
+
+export async function recordStat(
+  type: "reply_sent" | "reply_failed" | "webhook_received" | "error",
+  category?: string,
+): Promise<void> {
+  try {
+    const field = type === "reply_sent" ? "replies_sent"
+      : type === "reply_failed" ? "replies_failed"
+      : type === "webhook_received" ? "webhooks_received"
+      : "errors";
+
+    if (category) {
+      await pool.query(
+        `INSERT INTO bot_stats (hour_bucket, ${field}, categories)
+         VALUES (date_trunc('hour', now()), 1, jsonb_build_object($1::text, 1))
+         ON CONFLICT (hour_bucket) DO UPDATE SET
+           ${field} = bot_stats.${field} + 1,
+           categories = CASE
+             WHEN bot_stats.categories ? $1::text
+             THEN jsonb_set(bot_stats.categories, ARRAY[$1::text], to_jsonb((bot_stats.categories->>$1::text)::int + 1))
+             ELSE bot_stats.categories || jsonb_build_object($1::text, 1)
+           END`,
+        [category],
+      );
+    } else {
+      await pool.query(
+        `INSERT INTO bot_stats (hour_bucket, ${field})
+         VALUES (date_trunc('hour', now()), 1)
+         ON CONFLICT (hour_bucket) DO UPDATE SET
+           ${field} = bot_stats.${field} + 1`,
+      );
+    }
+  } catch {}
+}
+
 export { pool };
 
 export type VideoContext = {
