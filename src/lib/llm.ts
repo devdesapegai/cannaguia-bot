@@ -121,10 +121,20 @@ export async function generateReply(
   isHater: boolean,
   videoContext?: string,
   recentComments?: Array<{ username: string; text: string }>,
+  isReply?: boolean,
 ): Promise<{ reply: string; category: CommentCategory; replyStyle: ReplyStyle } | null> {
   try {
-    // Selecionar estilo de resposta
-    const style = selectReplyStyle();
+    // Comentario novo → sempre com pergunta curta
+    // Reply de volta → sorteia estilo normal
+    const style = isReply
+      ? selectReplyStyle()
+      : {
+          name: "pergunta_curta" as ReplyStyle,
+          instruction: `ESTILO: reação curta + pergunta CURTA sobre o que a pessoa disse.
+Reaja ao comentário e termine com pergunta de NO MÁXIMO 5 palavras.
+A pergunta TEM que ser sobre algo específico do comentário da pessoa.
+Ex: "aí é nível profissional 😂🔥 bola ou seda?", "sem volta depois 😂🔥 qual a preferida?"`,
+        };
 
     // Montar system prompt com estilo + anti-repeticao
     const systemPrompt = SYSTEM_PROMPT + `\n\n${style.instruction}` + await buildRecentContext();

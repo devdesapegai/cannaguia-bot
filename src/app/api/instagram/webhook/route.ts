@@ -211,7 +211,7 @@ async function processWebhook(body: WebhookPayload) {
       }
 
       // Gerar resposta (LLM classifica + responde com estilo aleatorio)
-      const result = await generateReply(text, caption, isHater, videoContext, recentComments);
+      const result = await generateReply(text, caption, isHater, videoContext, recentComments, !!parent_id);
       if (!result) {
         log("reply_failed", { comment_id: commentId, error: "no reply generated" });
         continue;
