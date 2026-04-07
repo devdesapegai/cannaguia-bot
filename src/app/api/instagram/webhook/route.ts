@@ -33,6 +33,9 @@ export async function GET(req: NextRequest) {
 export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
+  // MANUTENCAO: bot desligado, retorna 200 sem processar
+  return NextResponse.json({ status: "maintenance" }, { status: 200 });
+
   const startTime = Date.now();
 
   // Ler raw body pra validacao de assinatura
