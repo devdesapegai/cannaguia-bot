@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { useRouter } from "next/navigation";
 
 type MediaItem = {
   media_id: string;
@@ -28,16 +27,15 @@ export default function AdminPage() {
   const [dateTo, setDateTo] = useState("");
   const [editTexts, setEditTexts] = useState<Record<string, string>>({});
   const [fullyLoaded, setFullyLoaded] = useState(false);
-  const router = useRouter();
   const loadingRef = useRef(false);
 
   const fetchPage = useCallback(async (cursor?: string): Promise<{ items: MediaItem[]; nextCursor: string | null; hasMore: boolean }> => {
     const url = cursor ? `/api/admin/media?cursor=${cursor}` : "/api/admin/media";
     const res = await fetch(url);
-    if (res.status === 401) { router.push("/admin/login"); throw new Error("unauthorized"); }
+    if (res.status === 401) { window.location.href = "/admin/login"; throw new Error("unauthorized"); }
     if (!res.ok) throw new Error("Erro ao carregar midia");
     return res.json();
-  }, [router]);
+  }, []);
 
   // Load first page fast, then continue in background
   const loadAll = useCallback(async () => {
@@ -141,20 +139,8 @@ export default function AdminPage() {
     }
   }
 
-  async function handleLogout() {
-    await fetch("/api/admin/auth", { method: "DELETE" });
-    router.push("/admin/login");
-  }
-
   return (
-    <div style={{ maxWidth: 1000, margin: "0 auto", padding: 24, fontFamily: "system-ui, sans-serif" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-        <h1 style={{ fontSize: 22, margin: 0 }}>CannaGuia - Contextos de Video</h1>
-        <button onClick={handleLogout} style={{
-          padding: "8px 16px", background: "#374151", color: "#fff",
-          border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13
-        }}>Sair</button>
-      </div>
+    <div style={{ maxWidth: 1000, margin: "0 auto", padding: 24 }}>
 
       {error && (
         <div style={{ background: "#fee", color: "#c00", padding: 12, borderRadius: 6, marginBottom: 16 }}>
