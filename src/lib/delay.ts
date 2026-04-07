@@ -9,12 +9,12 @@ export function calculateDelay(): number {
   const u2 = Math.random();
   const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
 
-  const medianSec = 90;
-  const sigma = 0.5;
+  const medianSec = 60;
+  const sigma = 0.4;
   const seconds = Math.exp(Math.log(medianSec) + sigma * z);
 
-  // Clamp entre 30s e 300s
-  const clamped = Math.max(30, Math.min(300, seconds));
+  // Clamp entre 30s e 180s (3min)
+  const clamped = Math.max(30, Math.min(180, seconds));
   return Math.round(clamped * 1000);
 }
 
