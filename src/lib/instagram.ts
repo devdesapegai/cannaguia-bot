@@ -13,7 +13,7 @@ function authHeaders(token: string): Record<string, string> {
   };
 }
 
-async function fetchWithRetry(url: string, options: RequestInit, retries = 1): Promise<Response> {
+async function fetchWithRetry(url: string, options: RequestInit, retries = 3, attempt = 0): Promise<Response> {
   const res = await fetch(url, options);
   if (res.ok) return res;
 
@@ -26,9 +26,10 @@ async function fetchWithRetry(url: string, options: RequestInit, retries = 1): P
 
   const retryableCodes = [1, 2, 4, 17];
   if (retries > 0 && retryableCodes.includes(errorCode)) {
-    log("error", { error: `Retrying after error code ${errorCode}` });
-    await new Promise(r => setTimeout(r, 2000));
-    return fetchWithRetry(url, options, retries - 1);
+    const delay = 2000 * Math.pow(2, attempt); // 2s, 4s, 8s
+    log("error", { error: `Retrying after error code ${errorCode}, attempt ${attempt + 1}, waiting ${delay / 1000}s` });
+    await new Promise(r => setTimeout(r, delay));
+    return fetchWithRetry(url, options, retries - 1, attempt + 1);
   }
 
   log("error", { error: `Instagram API error ${errorCode}: ${errorText.slice(0, 200)}` });
