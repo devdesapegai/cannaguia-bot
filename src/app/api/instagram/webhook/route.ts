@@ -11,7 +11,6 @@ import { canReply } from "@/lib/rate-limit";
 import { log } from "@/lib/logger";
 import { OWN_USERNAME } from "@/lib/constants";
 import { getVideoContext, saveFailedReply, logResponse, recordStat } from "@/lib/supabase";
-import { shouldSkipNight } from "@/lib/time-awareness";
 import { shouldSkip, EMOJI_ONLY_SKIP_RATE } from "@/lib/smart-skip";
 import { calculateDelay, INLINE_DELAY_MAX } from "@/lib/delay";
 import "@/lib/env";
@@ -178,14 +177,7 @@ async function processWebhook(body: WebhookPayload) {
         continue;
       }
 
-      // Modo noturno (23h-07h SP): skip 80%
-      if (!mentionedBot && shouldSkipNight()) {
-        log("night_skipped", { comment_id: commentId });
-        recordStat("night_skipped");
-        continue;
-      }
-
-      // Smart skip pre-LLM: emoji-only (70% skip)
+      // Smart skip pre-LLM: emoji-only
       const isEmojiOnly = EMOJI_ONLY_REGEX.test(text.trim());
       if (isEmojiOnly && !mentionedBot && Math.random() < EMOJI_ONLY_SKIP_RATE) {
         log("smart_skipped", { comment_id: commentId, reason: "emoji_only" });

@@ -20,19 +20,19 @@ describe("canReply", () => {
     expect(await canReply()).toBe(true);
   });
 
-  it("bloqueia quando count atingiu limite (120)", async () => {
+  it("bloqueia quando count atingiu limite (200)", async () => {
     const recentWindow = new Date().toISOString();
     mockQuery
       .mockResolvedValueOnce({ rows: [] }) // isRecentPost — no burst
-      .mockResolvedValueOnce({ rows: [{ window_start: recentWindow, reply_count: 120 }] });
+      .mockResolvedValueOnce({ rows: [{ window_start: recentWindow, reply_count: 200 }] });
     expect(await canReply()).toBe(false);
   });
 
-  it("permite burst ate 200 quando tem post recente", async () => {
+  it("permite burst ate 300 quando tem post recente", async () => {
     const recentWindow = new Date().toISOString();
     mockQuery
       .mockResolvedValueOnce({ rows: [{ "?column?": 1 }] }) // isRecentPost — burst mode
-      .mockResolvedValueOnce({ rows: [{ window_start: recentWindow, reply_count: 150 }] })
+      .mockResolvedValueOnce({ rows: [{ window_start: recentWindow, reply_count: 250 }] })
       .mockResolvedValueOnce({ rowCount: 1 }); // increment
     expect(await canReply()).toBe(true);
   });

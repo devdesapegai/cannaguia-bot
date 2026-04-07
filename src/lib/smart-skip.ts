@@ -1,13 +1,13 @@
 import type { CommentCategory } from "./llm";
 
 const SKIP_RATES: Record<CommentCategory, number> = {
-  duvida: 0.05,
-  desabafo: 0.0,
-  elogio: 0.30,
-  zueira: 0.40,
-  geral: 0.50,
-  cultivo: 0.10,
-  hater: 0.0,
+  duvida: 0,
+  desabafo: 0,
+  elogio: 0,
+  zueira: 0,
+  geral: 0,
+  cultivo: 0,
+  hater: 0,
 };
 
 /**
@@ -20,5 +20,5 @@ export function shouldSkip(category: CommentCategory, mentionedBot: boolean): bo
   return Math.random() < rate;
 }
 
-/** Skip rate pra comentarios emoji-only (aplicar ANTES do LLM) */
-export const EMOJI_ONLY_SKIP_RATE = 0.70;
+/** Skip rate pra comentarios emoji-only (0 = responde tudo) */
+export const EMOJI_ONLY_SKIP_RATE = 0;

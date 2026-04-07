@@ -1,8 +1,8 @@
 import { pool } from "./supabase";
 
-const MAX_REPLIES = 120;
-const BURST_MAX = 200;
-const WARN_THRESHOLD = 100;
+const MAX_REPLIES = 200;
+const BURST_MAX = 300;
+const WARN_THRESHOLD = 170;
 const WINDOW_MS = 60 * 60 * 1000; // 1 hora
 
 /** Detecta se tem post novo (primeira resposta ha menos de 1h) */
