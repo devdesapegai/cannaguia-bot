@@ -18,6 +18,9 @@ type EventType =
   | "mention_replied"
   | "caption_fetched"
   | "caption_empty"
+  | "night_skipped"
+  | "smart_skipped"
+  | "reply_scheduled"
   | "error";
 
 interface LogData {

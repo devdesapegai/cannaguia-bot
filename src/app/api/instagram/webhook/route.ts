@@ -11,7 +11,12 @@ import { canReply } from "@/lib/rate-limit";
 import { log } from "@/lib/logger";
 import { OWN_USERNAME } from "@/lib/constants";
 import { getVideoContext, saveFailedReply, logResponse, recordStat } from "@/lib/supabase";
+import { shouldSkipNight } from "@/lib/time-awareness";
+import { shouldSkip, EMOJI_ONLY_SKIP_RATE } from "@/lib/smart-skip";
+import { calculateDelay, INLINE_DELAY_MAX } from "@/lib/delay";
 import "@/lib/env";
+
+const EMOJI_ONLY_REGEX = /^[\p{Emoji}\p{Emoji_Component}\s]+$/u;
 
 export async function GET(req: NextRequest) {
   const searchParams = req.nextUrl.searchParams;
@@ -173,6 +178,21 @@ async function processWebhook(body: WebhookPayload) {
         continue;
       }
 
+      // Modo noturno (23h-07h SP): skip 80%
+      if (!mentionedBot && shouldSkipNight()) {
+        log("night_skipped", { comment_id: commentId });
+        recordStat("night_skipped");
+        continue;
+      }
+
+      // Smart skip pre-LLM: emoji-only (70% skip)
+      const isEmojiOnly = EMOJI_ONLY_REGEX.test(text.trim());
+      if (isEmojiOnly && !mentionedBot && Math.random() < EMOJI_ONLY_SKIP_RATE) {
+        log("smart_skipped", { comment_id: commentId, reason: "emoji_only" });
+        recordStat("smart_skipped");
+        continue;
+      }
+
       // Rate limiting
       if (!await canReply()) {
         log("rate_limited", { comment_id: commentId });
@@ -198,31 +218,47 @@ async function processWebhook(body: WebhookPayload) {
         log("caption_empty", { comment_id: commentId, media_id: mediaId });
       }
 
-      // Delay aleatorio pra parecer mais natural (15-45s)
-      const delay = Math.floor(Math.random() * 30 + 15) * 1000;
-      await new Promise(r => setTimeout(r, delay));
-
-      // Gerar resposta (LLM classifica + responde numa unica chamada)
+      // Gerar resposta (LLM classifica + responde com estilo aleatorio)
       const result = await generateReply(text, caption, isHater, videoContext, recentComments);
       if (!result) {
         log("reply_failed", { comment_id: commentId, error: "no reply generated" });
         continue;
       }
 
-      log("comment_classified", { comment_id: commentId, category: result.category });
+      log("comment_classified", { comment_id: commentId, category: result.category, reply_style: result.replyStyle });
       log("reply_generated", { comment_id: commentId, reply: result.reply.slice(0, 100) });
 
-      // Postar resposta (marca o usuario)
+      // Smart skip pos-LLM: baseado na categoria
+      if (shouldSkip(result.category, mentionedBot)) {
+        log("smart_skipped", { comment_id: commentId, category: result.category, reason: "category_skip" });
+        recordStat("smart_skipped");
+        continue;
+      }
+
+      // Delay natural (distribuicao log-normal, mediana 90s)
       const mention = from?.username ? `@${from.username} ` : "";
-      const success = await replyToComment(commentId, mention + result.reply);
-      if (success) {
-        log("reply_posted", { comment_id: commentId, username: from?.username, reply: result.reply.slice(0, 100) });
+      const delayMs = calculateDelay();
+
+      if (delayMs <= INLINE_DELAY_MAX) {
+        // Fast path: delay curto, faz inline
+        await new Promise(r => setTimeout(r, delayMs));
+        const success = await replyToComment(commentId, mention + result.reply);
+        if (success) {
+          log("reply_posted", { comment_id: commentId, username: from?.username, reply: result.reply.slice(0, 100), delay_s: Math.round(delayMs / 1000) });
+          logResponse({ commentId, originalText: text, botReply: result.reply, category: result.category, mediaId, username: from?.username, replyType: "comment" });
+          recordStat("reply_sent", result.category);
+        } else {
+          log("reply_failed", { comment_id: commentId, error: "instagram API error, saving to retry queue" });
+          await saveFailedReply(commentId, result.reply, from?.username, "comment", mediaId);
+          recordStat("reply_failed");
+        }
+      } else {
+        // Slow path: delay longo, agenda na fila pro cron postar
+        const scheduledAt = new Date(Date.now() + delayMs);
+        await saveFailedReply(commentId, result.reply, from?.username, "comment", mediaId, scheduledAt);
+        log("reply_scheduled", { comment_id: commentId, delay_s: Math.round(delayMs / 1000), scheduled_at: scheduledAt.toISOString() });
         logResponse({ commentId, originalText: text, botReply: result.reply, category: result.category, mediaId, username: from?.username, replyType: "comment" });
         recordStat("reply_sent", result.category);
-      } else {
-        log("reply_failed", { comment_id: commentId, error: "instagram API error, saving to retry queue" });
-        await saveFailedReply(commentId, result.reply, from?.username, "comment", mediaId);
-        recordStat("reply_failed");
       }
     }
   }

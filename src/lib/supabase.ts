@@ -30,13 +30,20 @@ export async function saveFailedReply(
   username?: string,
   replyType: "comment" | "dm" = "comment",
   mediaId?: string,
+  scheduledAt?: Date,
 ): Promise<void> {
   try {
+    const retryAt = scheduledAt
+      ? `$6::timestamptz`
+      : `now() + interval '1 minute'`;
+    const params = [commentId, username || null, message, replyType, mediaId || null];
+    if (scheduledAt) params.push(scheduledAt.toISOString());
+
     await pool.query(
       `INSERT INTO failed_replies (comment_id, username, message, reply_type, media_id, next_retry_at)
-       VALUES ($1, $2, $3, $4, $5, now() + interval '1 minute')
+       VALUES ($1, $2, $3, $4, $5, ${retryAt})
        ON CONFLICT (comment_id) DO NOTHING`,
-      [commentId, username || null, message, replyType, mediaId || null]
+      params
     );
   } catch (e) {
     console.error("[failed_replies] save error:", e);
@@ -135,14 +142,19 @@ export async function logResponse(params: {
 }
 
 export async function recordStat(
-  type: "reply_sent" | "reply_failed" | "webhook_received" | "error",
+  type: "reply_sent" | "reply_failed" | "webhook_received" | "error" | "smart_skipped" | "night_skipped",
   category?: string,
 ): Promise<void> {
   try {
-    const field = type === "reply_sent" ? "replies_sent"
-      : type === "reply_failed" ? "replies_failed"
-      : type === "webhook_received" ? "webhooks_received"
-      : "errors";
+    const fieldMap: Record<string, string> = {
+      reply_sent: "replies_sent",
+      reply_failed: "replies_failed",
+      webhook_received: "webhooks_received",
+      error: "errors",
+      smart_skipped: "smart_skipped",
+      night_skipped: "night_skipped",
+    };
+    const field = fieldMap[type] || "errors";
 
     if (category) {
       await pool.query(
