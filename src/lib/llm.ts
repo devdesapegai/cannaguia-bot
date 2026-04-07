@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { validateOutput } from "./output-filter";
-import { addRecentReply, getRecentReplies } from "./recent-replies";
+import { addRecentReply, getRecentReplies, isDuplicateReply } from "./recent-replies";
 import { postProcess } from "./post-process";
 import { summarizeCaption } from "./caption-summary";
 import { PROFILE_HANDLE } from "./constants";
@@ -171,15 +171,38 @@ Ex: "aí é nível profissional 😂🔥 bola ou seda?", "sem volta depois 😂�
     const { category, reply } = parseResponse(raw);
     const processed = postProcess(reply);
     const { safe, flagged } = validateOutput(processed);
-    if (safe) {
-      await addRecentReply(processed);
-      return { reply: processed, category, replyStyle: style.name };
+    if (!safe) {
+      console.warn(`[llm] Flagged: ${flagged.join(", ")} — tentando fallback`);
+      const fallbackReply = await rewriteFallback(processed);
+      if (fallbackReply) return { reply: fallbackReply, category, replyStyle: style.name };
+      return null;
     }
 
-    console.warn(`[llm] Flagged: ${flagged.join(", ")} — tentando fallback`);
-    const fallbackReply = await rewriteFallback(processed);
-    if (fallbackReply) return { reply: fallbackReply, category, replyStyle: style.name };
-    return null;
+    // Checar se e resposta duplicada/similar a recentes
+    if (await isDuplicateReply(processed)) {
+      console.warn(`[llm] Resposta duplicada: "${processed}" — gerando nova`);
+      // Tenta mais uma vez com temperature mais alta
+      const retry = await client.responses.create({
+        model: process.env.OPENAI_MODEL || "gpt-5.4-mini",
+        instructions: systemPrompt + "\nIMPORTANTE: sua resposta anterior foi repetida. Crie algo COMPLETAMENTE diferente.",
+        input: userMessage,
+        temperature: 1.0,
+        max_output_tokens: 80,
+      });
+      const retryRaw = retry.output_text?.trim();
+      if (retryRaw) {
+        const retryParsed = parseResponse(retryRaw);
+        const retryProcessed = postProcess(retryParsed.reply);
+        const retryValidation = validateOutput(retryProcessed);
+        if (retryValidation.safe) {
+          await addRecentReply(retryProcessed);
+          return { reply: retryProcessed, category: retryParsed.category, replyStyle: style.name };
+        }
+      }
+    }
+
+    await addRecentReply(processed);
+    return { reply: processed, category, replyStyle: style.name };
   } catch (error) {
     console.error("[llm] Error:", error);
     return null;
