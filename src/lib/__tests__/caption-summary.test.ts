@@ -9,10 +9,24 @@ describe("summarizeCaption", () => {
     expect(summarizeCaption("Post sobre plantinha")).toBe("Post sobre plantinha");
   });
 
-  it("remove hashtags", () => {
-    const caption = "Bom dia galera #cannabis #medicinal #cultivo e mais texto aqui pra ficar maior";
+  it("remove hashtags genericas mas preserva tags do nicho como contexto", () => {
+    const caption = "Bom dia galera #cannabis #medicinal #cultivo e mais texto";
     const result = summarizeCaption(caption);
     expect(result).not.toContain("#");
+    expect(result).toContain("[tags: medicinal, cultivo]");
+  });
+
+  it("preserva hashtags do nicho de cultivo", () => {
+    const caption = "Dia 45 🌱 #flora #indoor #grow";
+    const result = summarizeCaption(caption);
+    expect(result).toContain("[tags: flora, indoor, grow]");
+  });
+
+  it("nao adiciona tags se nenhuma hashtag do nicho", () => {
+    const caption = "Post sobre a vida #love #blessed";
+    const result = summarizeCaption(caption);
+    expect(result).not.toContain("[tags:");
+    expect(result).toBe("Post sobre a vida");
   });
 
   it("corta no fim da primeira frase se caption longa", () => {

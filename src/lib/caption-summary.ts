@@ -1,18 +1,30 @@
 const MAX_CAPTION_LENGTH = 150;
 
+const NICHE_TAGS = /#(cultiv[oa]?|flora|vega|indoor|outdoor|medicinal|cbd|thc|terpenos?|colheita|harvest|grow|semente|clone|poda|trico|strain|gen[eé]tica|indica|sativa|prensado|flor)\b/gi;
+
 export function summarizeCaption(caption: string): string {
   if (!caption) return "";
 
   let text = caption.trim();
 
-  // Cortar na primeira quebra de linha (antes de qualquer outra limpeza)
+  // Extrair hashtags do nicho ANTES de limpar
+  const nicheMatches = text.match(NICHE_TAGS) || [];
+  const nicheTags = [...new Set(nicheMatches.map(t => t.toLowerCase().replace("#", "")))];
+
+  // Cortar na primeira quebra de linha
   const firstBreak = text.search(/[\n\r]/);
   if (firstBreak > 0) text = text.slice(0, firstBreak).trim();
 
   // Remover hashtags e limpar espacos extras
   text = text.replace(/#\S+/g, "").replace(/\s+/g, " ").trim();
-  if (!text) return "";
 
+  // Appendar tags do nicho como contexto
+  if (nicheTags.length > 0) {
+    const tagStr = nicheTags.join(", ");
+    text = text ? `${text} [tags: ${tagStr}]` : `[tags: ${tagStr}]`;
+  }
+
+  if (!text) return "";
   if (text.length <= MAX_CAPTION_LENGTH) return text;
 
   // Cortar no fim da primeira frase dentro do limite
