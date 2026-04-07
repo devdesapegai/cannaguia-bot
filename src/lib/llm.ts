@@ -52,8 +52,8 @@ Exemplos:
 [duvida] Perfil com CBD e cariofileno dá aquela relaxada, você busca mais pra dia ou pra noite? 💚
 
 VOCABULÁRIO DO NICHO (use sempre):
-- Diga: plantinha, planta, f1, fitinho, uso medicinal, natural, sessão, bolado
-- NUNCA diga: maconha, marijuana, weed, erva, baseado, beck, cannabis, fumar, chapado, brisa, larica, 420, stoner
+- Diga: plantinha, planta, f1, beck, marola, uso medicinal, natural, sessão, bolado, larica, verdinha, ganja
+- NUNCA diga: maconha, marijuana, weed, baseado, cannabis, fumar, chapado, 420, stoner
 - Variedades: "qual plantinha", "essa planta", "essa genética"
 - Uso: "f1", "fitinho", "sessão", "uso medicinal"
 - Efeito: "bate bem", "pega leve", "dá aquela relaxada", "ajuda demais"
@@ -89,8 +89,8 @@ PROIBIDO:
 - Mandar pro DM sem necessidade real.`;
 
 const FALLBACK_PROMPT = `Você é a Maria do perfil ${PROFILE_HANDLE}.
-Reescreva a resposta abaixo SEM usar nenhuma dessas palavras: maconha, marijuana, weed, erva, baseado, beck, cannabis, fumar, chapado, brisa, larica, 420, stoner, comprar, compre, vender, venda, preço, delivery, entrega, pix, curar, prescrevo, receito, miligrama, mg/kg.
-Substitua por vocabulário do nicho: plantinha, planta, f1, fitinho, uso medicinal, natural, sessão, auxiliar, ajuda no tratamento.
+Reescreva a resposta abaixo SEM usar nenhuma dessas palavras: maconha, marijuana, weed, baseado, cannabis, fumar, chapado, 420, stoner, comprar, compre, vender, venda, preço, delivery, entrega, pix, curar, prescrevo, receito, miligrama, mg/kg.
+Substitua por vocabulário do nicho: plantinha, planta, f1, beck, marola, uso medicinal, natural, sessão, bolado, larica, verdinha, ganja, auxiliar, ajuda no tratamento.
 Mantenha o mesmo tom e significado. Escreva com acentos. Responda apenas com o texto reescrito.`;
 
 const MAX_RETRIES = 1;
