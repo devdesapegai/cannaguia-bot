@@ -63,7 +63,28 @@ export async function POST(req: NextRequest) {
 
   const fields = (body.entry || []).flatMap((e: WebhookEntry) => (e.changes || []).map(c => c.field));
   const hasMessaging = (body.entry || []).some((e: WebhookEntry) => e.messaging && e.messaging.length > 0);
-  log("webhook_received", { processing_time_ms: Date.now() - startTime, fields: fields.join(",") || (hasMessaging ? "messaging" : "empty") });
+
+  // Log completo do payload pra debug
+  const payloadSummary = (body.entry || []).map((e: WebhookEntry) => ({
+    changes: (e.changes || []).map(c => ({
+      field: c.field,
+      comment_id: c.value?.id,
+      text: c.value?.text?.slice(0, 80),
+      username: c.value?.from?.username,
+      media_id: c.value?.media?.id,
+      parent_id: c.value?.parent_id,
+    })),
+    messaging: (e.messaging || []).map(m => ({
+      sender: m.sender?.id,
+      text: m.message?.text?.slice(0, 80),
+      is_echo: m.message?.is_echo,
+    })),
+  }));
+  log("webhook_received", {
+    processing_time_ms: Date.now() - startTime,
+    fields: fields.join(",") || (hasMessaging ? "messaging" : "empty"),
+    payload: JSON.stringify(payloadSummary),
+  });
 
   // Processar em background com after() — retorna 200 imediatamente
   after(async () => {
