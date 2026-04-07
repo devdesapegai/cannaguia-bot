@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 
 type DashboardData = {
   totals: { total_sent: number; total_failed: number; total_webhooks: number; total_errors: number };
@@ -14,18 +14,68 @@ type DashboardData = {
   }>;
 };
 
+const POLL_INTERVAL = 30_000; // 30 segundos
+
+function playNotificationSound() {
+  try {
+    const ctx = new AudioContext();
+    // Beep duplo
+    [0, 0.2].forEach(offset => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = 880;
+      osc.type = "sine";
+      gain.gain.setValueAtTime(0.3, ctx.currentTime + offset);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + offset + 0.15);
+      osc.start(ctx.currentTime + offset);
+      osc.stop(ctx.currentTime + offset + 0.15);
+    });
+  } catch {}
+}
+
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const prevSentRef = useRef<number | null>(null);
+  const prevWebhooksRef = useRef<number | null>(null);
+
+  const fetchData = useCallback(async () => {
+    try {
+      const r = await fetch("/api/admin/dashboard");
+      if (!r.ok) throw new Error("Erro ao carregar");
+      const d: DashboardData = await r.json();
+      setData(d);
+      setError(null);
+      setLastUpdate(new Date());
+
+      // Notificar se houve nova atividade
+      if (soundEnabled && prevSentRef.current !== null) {
+        const newSent = d.totals.total_sent;
+        const newWebhooks = d.totals.total_webhooks;
+        if (newSent > prevSentRef.current || newWebhooks > prevWebhooksRef.current!) {
+          playNotificationSound();
+        }
+      }
+
+      prevSentRef.current = d.totals.total_sent;
+      prevWebhooksRef.current = d.totals.total_webhooks;
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [soundEnabled]);
 
   useEffect(() => {
-    fetch("/api/admin/dashboard")
-      .then(r => { if (!r.ok) throw new Error("Erro"); return r.json(); })
-      .then(setData)
-      .catch(e => setError(String(e)))
-      .finally(() => setLoading(false));
-  }, []);
+    fetchData();
+    const interval = setInterval(fetchData, POLL_INTERVAL);
+    return () => clearInterval(interval);
+  }, [fetchData]);
 
   if (loading) return <p style={{ textAlign: "center", padding: 40, color: "#999" }}>Carregando...</p>;
   if (error) return <p style={{ textAlign: "center", padding: 40, color: "#c00" }}>{error}</p>;
@@ -35,6 +85,34 @@ export default function DashboardPage() {
 
   return (
     <div style={{ maxWidth: 1000, margin: "0 auto", padding: 24 }}>
+      {/* Controles */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <button
+            onClick={() => setSoundEnabled(!soundEnabled)}
+            style={{
+              padding: "6px 14px", borderRadius: 6, fontSize: 13, cursor: "pointer",
+              border: "1px solid #e5e7eb",
+              background: soundEnabled ? "#16a34a" : "#e5e7eb",
+              color: soundEnabled ? "#fff" : "#666",
+            }}
+          >
+            {soundEnabled ? "Som ON" : "Som OFF"}
+          </button>
+          <button
+            onClick={() => playNotificationSound()}
+            style={{ padding: "6px 14px", borderRadius: 6, fontSize: 13, cursor: "pointer", border: "1px solid #e5e7eb", background: "#fff" }}
+          >
+            Testar som
+          </button>
+        </div>
+        {lastUpdate && (
+          <span style={{ fontSize: 12, color: "#999" }}>
+            Atualizado: {lastUpdate.toLocaleTimeString("pt-BR")} (a cada 30s)
+          </span>
+        )}
+      </div>
+
       {/* Totais 24h */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 24 }}>
         <Card label="Respostas enviadas" value={t.total_sent} color="#16a34a" />
