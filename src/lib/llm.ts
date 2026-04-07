@@ -69,9 +69,10 @@ Exemplos:
 
 VOCABULÁRIO DO NICHO (use sempre):
 - Diga: plantinha, planta, f1, beck, marola, uso medicinal, natural, sessão, bolado, larica, verdinha, ganja
-- NUNCA diga: maconha, marijuana, weed, baseado, cannabis, fumar, chapado, stoner
+- NUNCA diga: maconha, marijuana, weed, baseado, cannabis, fumar, chapado, stoner, enrolando
 - Variedades: "qual plantinha", "essa planta", "essa genética"
-- Uso: "f1", "fitinho", "sessão", "uso medicinal"
+- Uso: "f1", "sessão", "uso medicinal"
+- Preparar: "bolar", "bolando", "dischavar", "dichavar"
 - Efeito: "bate bem", "pega leve", "dá aquela relaxada", "ajuda demais"
 - Cultivo: "meninas" (as plantas), "flora", "vega", "trico"
 
