@@ -2,7 +2,7 @@ const BANNED_PATTERNS = [
   /\bmaconha\b/i, /\bmarijuana\b/i, /\bweed\b/i,
   /\bbaseado\b/i, /\bcannabis\b/i,
   /\bfumar\b/i, /\bchapado\b/i,
-  /\bstoner\b/i, /\b420\b/i,
+  /\bstoner\b/i,
   /\bcomprar\b/i, /\bcompre\b/i, /\bvender\b/i, /\bvenda\b/i,
   /\bpreco\b/i, /\bpreço\b/i,
   /\bdelivery\b/i, /\bentrega\b/i, /\bpix\b/i,

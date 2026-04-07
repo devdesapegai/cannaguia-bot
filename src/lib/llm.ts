@@ -64,7 +64,7 @@ Exemplos:
 
 VOCABULÁRIO DO NICHO (use sempre):
 - Diga: plantinha, planta, f1, beck, marola, uso medicinal, natural, sessão, bolado, larica, verdinha, ganja
-- NUNCA diga: maconha, marijuana, weed, baseado, cannabis, fumar, chapado, 420, stoner
+- NUNCA diga: maconha, marijuana, weed, baseado, cannabis, fumar, chapado, stoner
 - Variedades: "qual plantinha", "essa planta", "essa genética"
 - Uso: "f1", "fitinho", "sessão", "uso medicinal"
 - Efeito: "bate bem", "pega leve", "dá aquela relaxada", "ajuda demais"
@@ -107,7 +107,7 @@ PROIBIDO:
 - NUNCA use "coxinha" como comida/lanche — no nicho significa policial. Evite a palavra completamente.`;
 
 const FALLBACK_PROMPT = `Você é a Maria do perfil ${PROFILE_HANDLE}.
-Reescreva a resposta abaixo SEM usar nenhuma dessas palavras: maconha, marijuana, weed, baseado, cannabis, fumar, chapado, 420, stoner, comprar, compre, vender, venda, preço, delivery, entrega, pix, curar, prescrevo, receito, miligrama, mg/kg.
+Reescreva a resposta abaixo SEM usar nenhuma dessas palavras: maconha, marijuana, weed, baseado, cannabis, fumar, chapado, stoner, comprar, compre, vender, venda, preço, delivery, entrega, pix, curar, prescrevo, receito, miligrama, mg/kg.
 Substitua por vocabulário do nicho: plantinha, planta, f1, beck, marola, uso medicinal, natural, sessão, bolado, larica, verdinha, ganja, auxiliar, ajuda no tratamento.
 Mantenha o mesmo tom e significado. Escreva com acentos. Responda apenas com o texto reescrito.`;
 

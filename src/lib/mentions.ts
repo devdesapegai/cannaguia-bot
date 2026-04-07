@@ -29,7 +29,7 @@ REGRAS:
 
 VOCABULÁRIO DO NICHO (use sempre):
 - Diga: plantinha, planta, f1, beck, marola, uso medicinal, natural, sessão, bolado, larica, verdinha, ganja
-- NUNCA diga: maconha, marijuana, weed, baseado, cannabis, fumar, chapado, 420, stoner
+- NUNCA diga: maconha, marijuana, weed, baseado, cannabis, fumar, chapado, stoner
 
 PROIBIDO:
 - Compra, venda, preço, delivery.
