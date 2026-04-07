@@ -145,10 +145,11 @@ async function processWebhook(body: WebhookPayload) {
         continue;
       }
 
-      // Cooldown por usuario por post
+      // Cooldown por usuario por post (pula se marcou @bot diretamente)
       const userId = from?.id || "unknown";
       const mediaId = media?.id || "unknown";
-      if (await isOnCooldown(userId, mediaId)) {
+      const mentionedBot = text.toLowerCase().includes(`@${OWN_USERNAME}`);
+      if (!mentionedBot && await isOnCooldown(userId, mediaId)) {
         log("cooldown_skipped", { comment_id: commentId, username: from?.username, media_id: mediaId });
         continue;
       }
