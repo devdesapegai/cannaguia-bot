@@ -1,49 +1,37 @@
 export type ReplyStyle =
   | "reacao_pura"
-  | "opiniao_experiencia"
-  | "humor_provocacao"
-  | "pergunta_retorica"
-  | "pergunta_aberta";
+  | "reacao_com_pergunta"
+  | "humor_rotulo"
+  | "pergunta_curta";
 
 const STYLES: Array<{ name: ReplyStyle; weight: number; instruction: string }> = [
   {
     name: "reacao_pura",
-    weight: 40,
-    instruction: `ESTILO DESTA RESPOSTA: reação pura.
-Reaja ao comentário com energia (concordando, rindo, validando, exagerando). SEM pergunta no final.
-Máximo 1 frase curta. Pode ser só "KKKK demais 😂🔥", "Exato isso 🔥", "Fato.", "Quem nunca ne".
-Quanto mais natural e curta, melhor.`,
+    weight: 30,
+    instruction: `ESTILO: reação pura SEM pergunta.
+Dê um rótulo engraçado pro que a pessoa disse. 1 frase curta + 😂🔥
+Ex: "modo sobrevivência ativado 😂🔥", "nível profissional já 😂🔥"`,
   },
   {
-    name: "opiniao_experiencia",
-    weight: 25,
-    instruction: `ESTILO DESTA RESPOSTA: opinião ou experiência pessoal.
-Compartilhe algo da vivência da Maria sobre o tema. Conte uma mini-história ou dê uma opinião firme.
-SEM pergunta no final. Máximo 1-2 frases.
-Ex: "Pior que eu era igualzinha, depois que comecei a bolar com calma mudou tudo 🌱"`,
+    name: "reacao_com_pergunta",
+    weight: 35,
+    instruction: `ESTILO: reação curta + pergunta CURTA no final.
+1 frase de reação + pergunta de NO MÁXIMO 5 palavras.
+Ex: "aí é nível profissional já 😂🔥 e você?", "não tem volta depois 😂🔥 quem nunca?", "esse aí não perde tempo 😂🔥 né?"`,
   },
   {
-    name: "humor_provocacao",
+    name: "humor_rotulo",
+    weight: 20,
+    instruction: `ESTILO: rótulo/título engraçado SEM pergunta.
+Dê um nome criativo pro que a pessoa fez/disse. Curto e direto.
+Ex: "habilidade desbloqueada 😂🔥", "desculpa esfarrapada clássica 😂🔥", "café diferenciado 😂🔥"`,
+  },
+  {
+    name: "pergunta_curta",
     weight: 15,
-    instruction: `ESTILO DESTA RESPOSTA: humor leve ou provocação divertida.
-Brinque com o que a pessoa disse. Exagere, faça piada, provoque de leve. SEM pergunta.
-Máximo 1 frase. Precisa ser engraçada.
-Ex: "KKKK 26 anos e a memória já foi junto com a fumaça 😂"`,
-  },
-  {
-    name: "pergunta_retorica",
-    weight: 12,
-    instruction: `ESTILO DESTA RESPOSTA: reação + pergunta retórica curta.
-Reaja ao comentário e termine com uma pergunta retórica leve tipo "né?", "você também?", "quem nunca?", "fala sério".
-Máximo 1-2 frases. A pergunta NÃO precisa de resposta real, é mais pra validar.`,
-  },
-  {
-    name: "pergunta_aberta",
-    weight: 8,
-    instruction: `ESTILO DESTA RESPOSTA: reação + pergunta aberta genuína.
-Reaja e termine com uma pergunta sobre algo ESPECÍFICO que a pessoa disse.
-A pergunta deve pegar um detalhe do comentário e puxar por ali.
-Máximo 2 frases. A pergunta deve ser criativa e conectada, nunca genérica.`,
+    instruction: `ESTILO: reação + pergunta curta conectada.
+Reaja e termine com pergunta de NO MÁXIMO 5-6 palavras sobre algo que a pessoa disse.
+Ex: "calmaaa😂 equilíbrio é tudo viu🔥 e aí, tá conseguindo segurar?", "exposta com sucesso 😂🔥 qual combo perfeito pra vc?"`,
   },
 ];
 
