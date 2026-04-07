@@ -6,6 +6,7 @@ import { summarizeCaption } from "./caption-summary";
 import { PROFILE_HANDLE } from "./constants";
 import { selectReplyStyle, type ReplyStyle } from "./reply-style";
 import { detectEnergy, energyInstruction } from "./energy";
+import { getTimeContext } from "./time-awareness";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -156,6 +157,8 @@ Ex: "aí é nível profissional 😂🔥 bola ou seda?", "sem volta depois 😂�
     userMessage += `Comentario (responda este): "${comment}"`;
     if (isHater) userMessage += `\n(comentario ofensivo — responda firme e tranquila)`;
     if (energyHint) userMessage += energyHint;
+    const timeCtx = getTimeContext();
+    if (timeCtx) userMessage += timeCtx;
 
     const response = await client.responses.create({
       model: process.env.OPENAI_MODEL || "gpt-5.4-mini",

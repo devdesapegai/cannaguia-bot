@@ -25,9 +25,10 @@ Three webhook flows share one endpoint (`POST /api/instagram/webhook`):
 **Comments flow:**
 ```
 Meta webhook → signature validation → dedup (Supabase) → cooldown (skip if @mentioned) →
-input filter → rate limit (200/h, burst 300/h) → API dedup check →
+input filter → night mode skip (80%, bypass if @mentioned) →
+rate limit (200/h, burst 300/h) → API dedup check →
 fetch caption + video context + recent comments (parallel) →
-reply style selector (4 weighted styles) + energy matching →
+reply style selector (4 weighted styles) + energy matching + time context →
 LLM (classify + respond, format: [category] reply) →
 anti-repetition check (isDuplicateReply) →
 post-process (150 char limit) → output filter → fallback rewrite if flagged →
@@ -37,17 +38,19 @@ delay (log-normal, 30s-3min) → post inline (<45s) or schedule to queue (>45s)
 **DM flow:**
 ```
 Meta webhook → entry.messaging[] → ignore echo → dedup → rate limit →
-extract user profile → build conversation history →
+cancel pending follow-up (if any) → extract user profile → build conversation history →
 LLM with profile + history context →
 post-process (160 char limit) → output filter →
 typing indicator + 5s delay → send reply →
-if [WHATSAPP] tag or direct request: send generic template button card
+if [WHATSAPP] tag or direct request: send generic template button card + schedule follow-up
 ```
 
 **Mentions flow:**
 ```
 Meta webhook → entry.changes[field=mentions] → dedup → rate limit →
 fetch media caption + username → delay 15-45s →
+mention style selector (70% com_pergunta, 30% reacao_pura) + energy matching →
+optional CTA (18% chance) →
 LLM generates contextual comment → post-process → output filter →
 comment on the post that mentioned us
 ```
@@ -56,21 +59,22 @@ comment on the post that mentioned us
 
 - `src/app/api/instagram/webhook/route.ts` — webhook handler, routes comments, DMs, and mentions
 - `src/lib/llm.ts` — comment reply generation, reply style integration, energy matching, anti-repetition
-- `src/lib/dm.ts` — DM reply generation, WhatsApp redirect logic, typing indicator
+- `src/lib/dm.ts` — DM reply generation, WhatsApp redirect logic, typing indicator, follow-up scheduling
 - `src/lib/dm-history.ts` — per-user conversation history (Supabase, 10 msgs, 1h TTL)
 - `src/lib/user-profile.ts` — auto-extracted user profiles (Supabase persistence)
-- `src/lib/mentions.ts` — mention reply generation, comment on posts that tag us
+- `src/lib/mentions.ts` — mention reply generation, engagement hooks, CTA injection, comment on posts that tag us
 - `src/lib/instagram.ts` — Graph API v21.0 client (reply, hide, caption, comments, dedup check, retry with exponential backoff)
 - `src/lib/filters.ts` — input comment filter (spam→hide, risk→ignore, offensive→hater mode, emoji-only→respond)
 - `src/lib/output-filter.ts` — banned term validation on LLM output
 - `src/lib/post-process.ts` — `postProcess()` for comments (150 chars), `postProcessDm()` for DMs (160 chars)
-- `src/lib/constants.ts` — single source for `OWN_USERNAME` and `PROFILE_HANDLE`
+- `src/lib/constants.ts` — single source for `OWN_USERNAME`, `PROFILE_HANDLE`, `MENTION_CTA_CHANCE`
 - `src/lib/reply-style.ts` — weighted random reply style selector (4 styles: reacao_pura, reacao_com_pergunta, humor_rotulo, pergunta_curta)
 - `src/lib/energy.ts` — detects comment energy level (high/medium/low) for response matching
+- `src/lib/time-awareness.ts` — São Paulo timezone: night mode skip (80%), time context for LLM prompt adaptation
 - `src/lib/delay.ts` — log-normal delay distribution (median 60s, range 30s-3min)
 - `src/lib/smart-skip.ts` — category-based skip rates (currently all 0% — responds to everything)
 - `src/lib/recent-replies.ts` — anti-repetition: stores last 20 replies in Supabase, isDuplicateReply() check
-- `src/lib/supabase.ts` — Postgres pool, video context queries, failed replies queue, response logging, stats
+- `src/lib/supabase.ts` — Postgres pool, video context queries, failed replies queue, response logging, stats, DM follow-up helpers
 - `src/lib/dedup.ts` — deduplication + cooldown (Supabase persistence)
 - `src/lib/rate-limit.ts` — 200 replies/hour, burst 300/h for new posts
 - `src/lib/admin-auth.ts` — HMAC-SHA256 session tokens, rate-limited login
@@ -87,10 +91,14 @@ comment on the post that mentioned us
 
 - **Reply styles**: 4 weighted styles — reacao_com_pergunta (45%), pergunta_curta (25%), reacao_pura (15%), humor_rotulo (15%)
 - **First comment vs reply**: new comments (no parent_id) always get a question to open dialogue. Replies (has parent_id) use the weighted random selector.
+- **Mention engagement**: 70% of mention replies include a short question (max 5 words) to pull conversation on other people's posts. 30% are pure reactions.
+- **CTA in mentions**: 18% chance of natural profile mention in mention replies. Never "segue lá" — contextual tips only. Tracked via `mention_cta` in bot_stats.
 - **Energy matching**: high-energy comments (KKKK, many emojis, caps) get high-energy responses.
-- **Anti-repetition**: isDuplicateReply() checks last 20 replies for identical text, substrings, or matching first 5 words. If duplicate, regenerates with higher temperature.
+- **Time awareness**: night mode (23h-7h SP) skips 80% of comments (bypass if @mentioned) and adapts LLM tone to chill/intimate. Early morning (5h-7h) gets softer tone.
+- **Anti-repetition**: isDuplicateReply() checks last 20 replies for identical text, substrings, or matching first 5 words. If duplicate, regenerates with higher temperature. Shared between comments and mentions.
 - **Delay**: log-normal distribution (median 60s, range 30s-3min). Inline if <45s, queued for cron if >45s.
 - **Rate limit**: 200/h normal, 300/h burst when new post detected.
+- **DM follow-up**: when WhatsApp is offered to a user with health conditions/medications and they go silent, a gentle follow-up is sent 6h later via cron. Max 1 follow-up per user ever. Auto-cancelled if user responds.
 
 ## Database (Supabase PostgreSQL)
 
@@ -105,13 +113,14 @@ All state persists across Vercel cold starts:
 - `failed_replies` — retry queue + scheduled delayed posts
 - `response_log` — all bot responses for moderation
 - `bot_stats` — hourly stats (replies, failures, webhooks, errors, skips)
+- `dm_followups` — DM follow-up queue (UNIQUE per user, pending/sent/expired/cancelled)
 
-## Cron Job
+## Cron Jobs
 
-External cron (cron-job.org) calls `GET /api/cron/retry?token=CRON_SECRET` every minute:
-- Posts scheduled replies whose `next_retry_at` has passed
-- Retries failed replies with exponential backoff (1min, 2min, 4min, 8min, 16min)
-- Cleans up old records from dedup, cooldown, conversations, replies tables
+External cron (cron-job.org) calls these endpoints:
+
+- `GET /api/cron/retry?token=CRON_SECRET` — every minute: posts scheduled replies, retries failed replies with exponential backoff, cleans up expired state
+- `GET /api/cron/dm-followup?token=CRON_SECRET` — every 2 hours: sends pending DM follow-ups (max 5 per batch), expires old follow-ups past 23h window
 
 ## Runtime Patterns
 
@@ -128,7 +137,7 @@ External cron (cron-job.org) calls `GET /api/cron/retry?token=CRON_SECRET` every
 - **Video context**: when a comment arrives on a post, the bot queries `video_contexts` table for admin-provided context and injects it into the LLM prompt separately from the caption.
 - **Recent comments context**: bot fetches last 10 comments on the post via Graph API and injects them so the LLM understands the conversation.
 - **Nested replies**: bot ignores nested comment replies UNLESS the reply text contains `@mariaconsultoracannabica`.
-- **WhatsApp redirect in DMs**: LLM adds `[WHATSAPP]` tag when it detects the person needs personalized help. Mandatory when health conditions or legal cases are mentioned.
+- **WhatsApp redirect in DMs**: LLM adds `[WHATSAPP]` tag when it detects the person needs personalized help. Mandatory when health conditions or legal cases are mentioned. Follow-up scheduled if user has conditions/medications.
 - **User profiles in DMs**: auto-extracted from messages. Gender-aware responses. Slang-aware ("criança", "menina", "gorda" = the plant, not flirting).
 - **Token auth**: all Instagram API calls use `Authorization: Bearer` header, never query string.
 - **Debug logging**: every pipeline decision is logged with reason and full webhook payload.
@@ -140,6 +149,9 @@ External cron (cron-job.org) calls `GET /api/cron/retry?token=CRON_SECRET` every
 - Vocabulary: always "plantinha/f1/beck/marola/bolado/larica/ganja/bolar/dischavar", never "maconha/cannabis/weed/baseado/fumar/chapado/stoner/enrolando".
 - Audience is experienced cannabis users — questions should be peer-level ("bola ou seda?", "e a larica?"), never beginner-level ("já experimentou?").
 - "Coxinha" means police officer in this niche — never use as food reference.
+- Comment prompt receives energy level, reply style, and time context (madrugada/manhã cedo) — LLM must match all.
+- Night mode (23h–7h São Paulo time) adapts tone to chill/intimate. Early morning (5h-7h) gets softer tone.
+- Mention prompt includes engagement hook (70% with question) and optional CTA (18%) for profile visibility.
 - DM prompt includes transparency rules (admits being AI assistant), PIX/money refusal, anti-flirting with slang awareness.
 - Gender: unknown in comments (use neutral), extracted in DMs (use profile).
 
@@ -164,6 +176,6 @@ CRON_SECRET              — token for cron endpoint authentication
 - Instagram Graph API does NOT support liking comments — don't try to re-add it.
 - Rate limit: 200 replies/hour normal, 300/hour burst (Meta limit is 750).
 - Meta webhook subscriptions needed: `comments`, `messages`, `mentions`.
-- DM 24h window: can only reply within 24h of user's last message.
+- DM 24h window: can only reply within 24h of user's last message. Follow-up uses 23h buffer for safety.
 - Maria's videos have no audio (text/captions on screen only) — Whisper transcription doesn't work. Context must be manually added via admin panel.
 - Middleware runs on Edge Runtime — use Web Crypto API, not Node.js crypto module.

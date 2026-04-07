@@ -5,6 +5,7 @@ import { PROFILE_HANDLE } from "./constants";
 import { log } from "./logger";
 import { addMessage, getHistory, getMessageCount } from "./dm-history";
 import { extractProfileFromMessage, profileSummary, markWhatsAppOffered, getProfile } from "./user-profile";
+import { cancelFollowUp, scheduleFollowUp } from "./supabase";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -105,6 +106,9 @@ export interface DmResult {
 }
 
 export async function generateDmReply(message: string, senderId: string): Promise<DmResult | null> {
+  // Cancelar follow-up pendente se usuario voltou
+  await cancelFollowUp(senderId);
+
   // Registrar mensagem e extrair perfil
   await addMessage(senderId, "user", message);
   await extractProfileFromMessage(senderId, message);
@@ -169,7 +173,14 @@ export async function generateDmReply(message: string, senderId: string): Promis
 
     // Registrar resposta e marcar whatsapp se oferecido
     await addMessage(senderId, "assistant", processed);
-    if (whatsapp) await markWhatsAppOffered(senderId);
+    if (whatsapp) {
+      await markWhatsAppOffered(senderId);
+      const condition = profile.conditions[0]
+        || (profile.currentMedications.length > 0 ? "medicacao" : null);
+      if (condition) {
+        await scheduleFollowUp(senderId, condition);
+      }
+    }
 
     return { reply: processed, whatsapp };
   } catch (error) {

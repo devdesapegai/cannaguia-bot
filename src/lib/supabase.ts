@@ -180,6 +180,76 @@ export async function recordStat(
   } catch {}
 }
 
+// --- DM Follow-up ---
+
+export async function scheduleFollowUp(
+  userId: string,
+  condition: string,
+  delayHours = 6,
+): Promise<void> {
+  try {
+    const scheduledAt = new Date(Date.now() + delayHours * 60 * 60 * 1000);
+    await pool.query(
+      `INSERT INTO dm_followups (user_id, condition, scheduled_at)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_id) DO NOTHING`,
+      [userId, condition, scheduledAt.toISOString()],
+    );
+  } catch (e) {
+    console.error("[dm_followups] schedule error:", e);
+  }
+}
+
+export type PendingFollowUp = {
+  id: string;
+  user_id: string;
+  condition: string;
+  created_at: string;
+};
+
+export async function getPendingFollowUps(): Promise<PendingFollowUp[]> {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, user_id, condition, created_at FROM dm_followups
+       WHERE status = 'pending' AND scheduled_at <= now()
+       AND created_at > now() - interval '23 hours'
+       LIMIT 5`,
+    );
+    return rows;
+  } catch {
+    return [];
+  }
+}
+
+export async function markFollowUpSent(id: string): Promise<void> {
+  try {
+    await pool.query(
+      `UPDATE dm_followups SET status = 'sent', sent_at = now() WHERE id = $1`,
+      [id],
+    );
+  } catch (e) {
+    console.error("[dm_followups] mark sent error:", e);
+  }
+}
+
+export async function expireOldFollowUps(): Promise<void> {
+  try {
+    await pool.query(
+      `UPDATE dm_followups SET status = 'expired'
+       WHERE status = 'pending' AND created_at < now() - interval '23 hours'`,
+    );
+  } catch {}
+}
+
+export async function cancelFollowUp(userId: string): Promise<void> {
+  try {
+    await pool.query(
+      `UPDATE dm_followups SET status = 'cancelled' WHERE user_id = $1 AND status = 'pending'`,
+      [userId],
+    );
+  } catch {}
+}
+
 export { pool };
 
 export type VideoContext = {

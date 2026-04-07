@@ -12,6 +12,7 @@ import { log } from "@/lib/logger";
 import { OWN_USERNAME } from "@/lib/constants";
 import { getVideoContext, saveFailedReply, logResponse, recordStat } from "@/lib/supabase";
 import { shouldSkip, EMOJI_ONLY_SKIP_RATE } from "@/lib/smart-skip";
+import { shouldSkipNight } from "@/lib/time-awareness";
 import { calculateDelay, INLINE_DELAY_MAX } from "@/lib/delay";
 import "@/lib/env";
 
@@ -185,6 +186,13 @@ async function processWebhook(body: WebhookPayload) {
         continue;
       }
 
+      // Night mode: pula 80% dos comentarios, MAS nunca pula se mencionou @bot
+      if (!mentionedBot && shouldSkipNight()) {
+        log("night_skipped", { comment_id: commentId });
+        recordStat("night_skipped");
+        continue;
+      }
+
       // Rate limiting
       if (!await canReply()) {
         log("rate_limited", { comment_id: commentId });
@@ -304,6 +312,9 @@ async function processMentions(entry: WebhookEntry) {
       log("mention_replied", { media_id: mediaId, username, reply: reply.slice(0, 100) });
       logResponse({ originalText: caption, botReply: reply, mediaId, username, replyType: "mention" });
       recordStat("reply_sent");
+      if (reply.includes("perfil") || reply.includes("@mariaconsultoracannabica")) {
+        recordStat("reply_sent", "mention_cta");
+      }
     } else {
       log("reply_failed", { comment_id: mentionKey, error: "comment on mention failed" });
       recordStat("reply_failed");
