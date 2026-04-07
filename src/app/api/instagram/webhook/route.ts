@@ -10,7 +10,7 @@ import { isDuplicate, isOnCooldown } from "@/lib/dedup";
 import { canReply } from "@/lib/rate-limit";
 import { log } from "@/lib/logger";
 import { OWN_USERNAME } from "@/lib/constants";
-import { getVideoContext } from "@/lib/supabase";
+import { getVideoContext, saveFailedReply } from "@/lib/supabase";
 import "@/lib/env";
 
 export async function GET(req: NextRequest) {
@@ -215,7 +215,8 @@ async function processWebhook(body: WebhookPayload) {
       if (success) {
         log("reply_posted", { comment_id: commentId, username: from?.username, reply: result.reply.slice(0, 100) });
       } else {
-        log("reply_failed", { comment_id: commentId, error: "instagram API error" });
+        log("reply_failed", { comment_id: commentId, error: "instagram API error, saving to retry queue" });
+        await saveFailedReply(commentId, result.reply, from?.username, "comment", mediaId);
       }
     }
   }
