@@ -5,7 +5,7 @@ const BANNED_PATTERNS = [
   /\bstoner\b/i,
   /\bcomprar\b/i, /\bcompre\b/i, /\bvender\b/i, /\bvenda\b/i,
   /\bpreco\b/i, /\bpreço\b/i,
-  /\bdelivery\b/i, /\bentrega\b/i, /\bpix\b/i,
+  /\bdelivery\b/i, /\bpix\b/i,
   /\bcurar\b/i, /\bprescrevo\b/i, /\breceito\b/i,
   /mg\/kg/i, /mg por kg/i, /\bmiligrama\b/i,
 ];
