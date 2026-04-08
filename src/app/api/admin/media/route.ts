@@ -3,6 +3,10 @@ import { pool } from "@/lib/supabase";
 
 const GRAPH_URL = "https://graph.instagram.com/v21.0";
 
+// Cache in-memory: chave = cursor (ou "first"), valor = resposta completa
+const mediaCache = new Map<string, { data: unknown; ts: number }>();
+const CACHE_TTL = 10 * 60 * 1000; // 10 minutos
+
 export async function GET(req: NextRequest) {
   const token = process.env.INSTAGRAM_ACCESS_TOKEN;
   if (!token) {
@@ -10,7 +14,15 @@ export async function GET(req: NextRequest) {
   }
 
   const cursor = req.nextUrl.searchParams.get("cursor") || "";
+  const cacheKey = cursor || "_first";
+  const noCache = req.nextUrl.searchParams.get("nocache") === "1";
   const limit = 20;
+
+  // Verificar cache
+  const cached = mediaCache.get(cacheKey);
+  if (!noCache && cached && Date.now() - cached.ts < CACHE_TTL) {
+    return NextResponse.json(cached.data);
+  }
 
   try {
     // Build Instagram API URL
@@ -55,7 +67,9 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    return NextResponse.json({ items, nextCursor, hasMore });
+    const result = { items, nextCursor, hasMore };
+    mediaCache.set(cacheKey, { data: result, ts: Date.now() });
+    return NextResponse.json(result);
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
@@ -77,6 +91,9 @@ export async function POST(req: NextRequest) {
        RETURNING *`,
       [media_id, (caption || "").slice(0, 80) || "Sem titulo", permalink || "", context_text]
     );
+
+    // Invalidar cache pra refletir o novo contexto
+    mediaCache.clear();
 
     return NextResponse.json(rows[0], { status: 201 });
   } catch (error) {
