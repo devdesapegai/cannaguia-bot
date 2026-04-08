@@ -9,9 +9,9 @@ function getPool(): pg.Pool {
     _pool = new pg.Pool({
       connectionString: url,
       ssl: { rejectUnauthorized: false },
-      max: 5,
-      connectionTimeoutMillis: 15000,
-      idleTimeoutMillis: 20000,
+      max: 3,
+      connectionTimeoutMillis: 8000,
+      idleTimeoutMillis: 10000,
     });
   }
   return _pool;
