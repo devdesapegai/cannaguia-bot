@@ -9,7 +9,9 @@ export async function GET() {
     const { rows } = await queryRetry(
       `SELECT fr.id, fr.comment_id, fr.username, fr.message, fr.original_text, fr.reply_type,
               fr.media_id, fr.attempts, fr.max_attempts, fr.created_at, fr.next_retry_at,
-              vc.title as media_title, vc.url as media_permalink
+              fr.parent_id,
+              vc.title as media_title, vc.url as media_permalink,
+              vc.context IS NOT NULL as has_video_context
        FROM failed_replies fr
        LEFT JOIN video_contexts vc ON fr.media_id = vc.media_id
        ORDER BY fr.created_at DESC

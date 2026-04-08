@@ -29,6 +29,7 @@ export async function saveFailedReply(
   mediaId?: string,
   scheduledAt?: Date,
   originalText?: string,
+  parentId?: string,
 ): Promise<void> {
   try {
     const retryAt = scheduledAt
@@ -40,9 +41,12 @@ export async function saveFailedReply(
     const otIdx = params.length + 1;
     params.push(originalText || null);
 
+    const pidIdx = params.length + 1;
+    params.push(parentId || null);
+
     await pool.query(
-      `INSERT INTO failed_replies (comment_id, username, message, reply_type, media_id, next_retry_at, original_text)
-       VALUES ($1, $2, $3, $4, $5, ${retryAt}, $${otIdx})
+      `INSERT INTO failed_replies (comment_id, username, message, reply_type, media_id, next_retry_at, original_text, parent_id)
+       VALUES ($1, $2, $3, $4, $5, ${retryAt}, $${otIdx}, $${pidIdx})
        ON CONFLICT (comment_id) DO NOTHING`,
       params
     );

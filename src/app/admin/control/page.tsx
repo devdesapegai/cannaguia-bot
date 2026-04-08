@@ -31,6 +31,14 @@ type QueueItem = {
   next_retry_at: string;
   media_title: string | null;
   media_permalink: string | null;
+  parent_id: string | null;
+  has_video_context: boolean | null;
+};
+
+type QueueContext = {
+  comments: Array<{ username: string; text: string; isOwn?: boolean }>;
+  caption: string | null;
+  videoContext: string | null;
 };
 
 type ResponseItem = {
@@ -113,6 +121,9 @@ export default function ControlPage() {
   const [editText, setEditText] = useState("");
   const [queueLoading, setQueueLoading] = useState<Record<number, boolean>>({});
   const [regenerating, setRegenerating] = useState<Record<number, boolean>>({});
+  const [contextOpen, setContextOpen] = useState<Record<number, boolean>>({});
+  const [contextData, setContextData] = useState<Record<number, QueueContext>>({});
+  const [contextLoading, setContextLoading] = useState<Record<number, boolean>>({});
 
   // Responses
   const [responses, setResponses] = useState<ResponseItem[]>([]);
@@ -235,6 +246,35 @@ export default function ControlPage() {
     } finally {
       setQueueLoading(prev => ({ ...prev, [id]: false }));
       if (action === "approve" || action === "reject") setEditingId(null);
+    }
+  }
+
+  async function toggleContext(item: QueueItem) {
+    if (contextOpen[item.id]) {
+      setContextOpen(prev => ({ ...prev, [item.id]: false }));
+      return;
+    }
+    // Ja tem dados? so abre
+    if (contextData[item.id]) {
+      setContextOpen(prev => ({ ...prev, [item.id]: true }));
+      return;
+    }
+    // Buscar contexto
+    setContextLoading(prev => ({ ...prev, [item.id]: true }));
+    try {
+      const params = new URLSearchParams();
+      if (item.media_id) params.set("media_id", item.media_id);
+      if (item.comment_id) params.set("comment_id", item.comment_id);
+      const res = await fetch(`/api/admin/control/queue/context?${params}`);
+      if (res.ok) {
+        const data = await res.json();
+        setContextData(prev => ({ ...prev, [item.id]: data }));
+      }
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setContextLoading(prev => ({ ...prev, [item.id]: false }));
+      setContextOpen(prev => ({ ...prev, [item.id]: true }));
     }
   }
 
@@ -437,11 +477,71 @@ export default function ControlPage() {
                         </a>
                       )}
                       <span style={{ fontSize: 11, color: "#999" }}>{item.attempts}/{item.max_attempts}</span>
+                      {/* Badge: subcomentario ou 1o comentario */}
+                      {item.parent_id ? (
+                        <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11, background: "#fae8ff", color: "#a21caf" }}>Subcomentario</span>
+                      ) : (
+                        <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11, background: "#ecfdf5", color: "#059669" }}>1o comentario</span>
+                      )}
+                      {/* Badge: video context */}
+                      {item.has_video_context ? (
+                        <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11, background: "#dbeafe", color: "#2563eb" }}>com contexto</span>
+                      ) : (
+                        <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11, background: "#fee2e2", color: "#dc2626" }}>sem contexto</span>
+                      )}
                     </div>
                     <span style={{ fontSize: 11, color: "#999" }}>
                       {new Date(item.created_at).toLocaleString("pt-BR")}
                     </span>
                   </div>
+
+                  {/* Botao ver contexto */}
+                  <div style={{ marginBottom: 8 }}>
+                    <button onClick={() => toggleContext(item)} disabled={contextLoading[item.id]}
+                      style={{
+                        padding: "3px 10px", background: "none", border: "1px solid #d1d5db",
+                        borderRadius: 4, cursor: "pointer", fontSize: 11, color: "#666",
+                      }}>
+                      {contextLoading[item.id] ? "Carregando..." : contextOpen[item.id] ? "Fechar contexto" : "Ver contexto"}
+                    </button>
+                  </div>
+
+                  {/* Painel de contexto expandido */}
+                  {contextOpen[item.id] && contextData[item.id] && (
+                    <div style={{
+                      background: "#f9fafb", borderRadius: 6, padding: 10, marginBottom: 8,
+                      border: "1px solid #e5e7eb", fontSize: 12,
+                    }}>
+                      {contextData[item.id].caption && (
+                        <div style={{ marginBottom: 6 }}>
+                          <span style={{ color: "#999" }}>Caption: </span>
+                          <span style={{ color: "#333" }}>{contextData[item.id].caption!.slice(0, 150)}</span>
+                        </div>
+                      )}
+                      {contextData[item.id].videoContext && (
+                        <div style={{ marginBottom: 6 }}>
+                          <span style={{ color: "#2563eb" }}>Contexto do video: </span>
+                          <span style={{ color: "#333" }}>{contextData[item.id].videoContext}</span>
+                        </div>
+                      )}
+                      {contextData[item.id].comments.length > 0 ? (
+                        <div>
+                          <div style={{ color: "#999", marginBottom: 4 }}>Comentarios recentes no post:</div>
+                          {contextData[item.id].comments.map((c, i) => (
+                            <div key={i} style={{
+                              padding: "3px 0", borderBottom: i < contextData[item.id].comments.length - 1 ? "1px solid #e5e7eb" : "none",
+                              color: c.isOwn ? "#16a34a" : "#333",
+                            }}>
+                              <span style={{ fontWeight: 500 }}>@{c.username}{c.isOwn ? " (Maria)" : ""}: </span>
+                              {c.text.slice(0, 100)}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div style={{ color: "#999" }}>Nenhum comentario encontrado no post</div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Content */}
                   {item.original_text && (

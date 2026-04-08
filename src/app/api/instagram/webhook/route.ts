@@ -245,7 +245,7 @@ async function processWebhook(body: WebhookPayload, botMode: string) {
 
       if (botMode === "manual" || isNewPost) {
         const reason = botMode === "manual" ? "manual_mode" : "new_post_manual";
-        await saveFailedReply(commentId, result.reply, from?.username, "comment", mediaId, undefined, text);
+        await saveFailedReply(commentId, result.reply, from?.username, "comment", mediaId, undefined, text, parent_id);
         log("reply_scheduled", { comment_id: commentId, reason });
         logResponse({ commentId, originalText: text, botReply: result.reply, category: result.category, mediaId, username: from?.username, replyType: "comment" });
         continue;
@@ -271,7 +271,7 @@ async function processWebhook(body: WebhookPayload, botMode: string) {
       } else {
         // Slow path: delay longo, agenda na fila pro cron postar
         const scheduledAt = new Date(Date.now() + delayMs);
-        await saveFailedReply(commentId, result.reply, from?.username, "comment", mediaId, scheduledAt);
+        await saveFailedReply(commentId, result.reply, from?.username, "comment", mediaId, scheduledAt, text, parent_id);
         log("reply_scheduled", { comment_id: commentId, delay_s: Math.round(delayMs / 1000), scheduled_at: scheduledAt.toISOString() });
         logResponse({ commentId, originalText: text, botReply: result.reply, category: result.category, mediaId, username: from?.username, replyType: "comment" });
         recordStat("reply_sent", result.category);
