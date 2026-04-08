@@ -42,20 +42,37 @@ export async function POST(req: NextRequest) {
         const item = rows[0];
         const replyText = message || item.message;
         const wasEdited = !!message && message !== item.message;
+        const source = wasEdited ? "manual" : "bot";
         const mention = item.username ? `@${item.username} ` : "";
         const success = await replyToComment(item.comment_id, mention + replyText);
         if (success) {
           await queryRetry("DELETE FROM failed_replies WHERE id = $1", [id]);
-          log("reply_posted", { comment_id: item.comment_id, username: item.username, reply: replyText.slice(0, 100), source: wasEdited ? "manual" : "bot" });
-          await logResponse({
-            commentId: item.comment_id,
-            originalText: item.original_text || "",
-            botReply: replyText,
-            mediaId: item.media_id,
-            username: item.username,
-            replyType: item.reply_type === "dm" ? "dm" : "comment",
-            source: wasEdited ? "manual" : "bot",
-          });
+          log("reply_posted", { comment_id: item.comment_id, username: item.username, reply: replyText.slice(0, 100), source });
+
+          // Atualizar response_log existente (webhook manual ja inseriu) ou criar novo
+          const { rows: existing } = await queryRetry(
+            "SELECT id FROM response_log WHERE comment_id = $1", [item.comment_id]
+          );
+          if (existing[0]) {
+            await queryRetry(
+              "UPDATE response_log SET bot_reply = $2, source = $3 WHERE id = $1",
+              [existing[0].id, replyText, source]
+            );
+            // Gerar embedding com o texto final
+            const { embedAndStore } = await import("@/lib/embeddings");
+            embedAndStore(existing[0].id, `${item.original_text || ""} -> ${replyText}`).catch(() => {});
+          } else {
+            await logResponse({
+              commentId: item.comment_id,
+              originalText: item.original_text || "",
+              botReply: replyText,
+              mediaId: item.media_id,
+              username: item.username,
+              replyType: item.reply_type === "dm" ? "dm" : "comment",
+              source,
+            });
+          }
+
           await recordStat("reply_sent");
           return NextResponse.json({ ok: true, posted: true });
         }
