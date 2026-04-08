@@ -38,6 +38,12 @@ export default function ModerationPage() {
   const [localReviews, setLocalReviews] = useState<Record<number, string>>({});
   const [saving, setSaving] = useState(false);
 
+  // Estado de edicao/envio por item
+  const [editing, setEditing] = useState<Record<number, string>>({});
+  const [sending, setSending] = useState<Record<number, boolean>>({});
+  const [regenerating, setRegenerating] = useState<Record<number, boolean>>({});
+  const [actionMsg, setActionMsg] = useState<Record<number, { type: "ok" | "err"; text: string }>>({});
+
   // Buscar lista de posts
   useEffect(() => {
     fetch("/api/admin/moderation?action=media_list")
@@ -123,6 +129,75 @@ export default function ModerationPage() {
     }
   }
 
+
+  // Regenerar resposta via LLM
+  async function handleRegenerate(item: ResponseItem) {
+    setRegenerating(prev => ({ ...prev, [item.id]: true }));
+    setActionMsg(prev => { const n = { ...prev }; delete n[item.id]; return n; });
+    try {
+      const res = await fetch("/api/admin/moderation/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "regenerate", id: item.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Erro ao regenerar");
+      // Atualizar item na lista
+      setItems(prev => prev.map(i => i.id === item.id ? { ...i, bot_reply: data.reply, category: data.category } : i));
+      setActionMsg(prev => ({ ...prev, [item.id]: { type: "ok", text: `Regenerada (${data.replyStyle})` } }));
+    } catch (e: any) {
+      setActionMsg(prev => ({ ...prev, [item.id]: { type: "err", text: e.message } }));
+    } finally {
+      setRegenerating(prev => ({ ...prev, [item.id]: false }));
+    }
+  }
+
+  // Enviar resposta pro Instagram
+  async function handleSend(item: ResponseItem) {
+    const reply = editing[item.id] ?? item.bot_reply;
+    if (!confirm(`Enviar pro Instagram?\n\n"${reply}"`)) return;
+
+    setSending(prev => ({ ...prev, [item.id]: true }));
+    setActionMsg(prev => { const n = { ...prev }; delete n[item.id]; return n; });
+    try {
+      const res = await fetch("/api/admin/moderation/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "send", id: item.id, reply }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Erro ao enviar");
+      // Marcar como revisada e remover da lista de pendentes
+      setItems(prev => prev.map(i => i.id === item.id ? { ...i, reviewed: true, feedback: "ok", bot_reply: reply } : i));
+      setEditing(prev => { const n = { ...prev }; delete n[item.id]; return n; });
+      setActionMsg(prev => ({ ...prev, [item.id]: { type: "ok", text: "Enviado + embedding salvo" } }));
+    } catch (e: any) {
+      setActionMsg(prev => ({ ...prev, [item.id]: { type: "err", text: e.message } }));
+    } finally {
+      setSending(prev => ({ ...prev, [item.id]: false }));
+    }
+  }
+
+  // Salvar edicao manual
+  async function handleSaveEdit(item: ResponseItem) {
+    const reply = editing[item.id];
+    if (!reply || reply === item.bot_reply) return;
+
+    try {
+      const res = await fetch("/api/admin/moderation/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update", id: item.id, reply }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Erro ao salvar");
+      setItems(prev => prev.map(i => i.id === item.id ? { ...i, bot_reply: data.reply } : i));
+      setEditing(prev => { const n = { ...prev }; delete n[item.id]; return n; });
+      setActionMsg(prev => ({ ...prev, [item.id]: { type: "ok", text: "Texto atualizado" } }));
+    } catch (e: any) {
+      setActionMsg(prev => ({ ...prev, [item.id]: { type: "err", text: e.message } }));
+    }
+  }
 
   const pendingCount = items.filter(i => !localReviews[i.id] && !i.reviewed).length;
   const localCount = Object.keys(localReviews).length;
@@ -270,8 +345,63 @@ export default function ModerationPage() {
 
                   <div style={{ marginBottom: 8 }}>
                     <div style={{ fontSize: 12, color: "#999", marginBottom: 2 }}>Resposta do bot:</div>
-                    <div style={{ fontSize: 14, color: "#111", fontWeight: 500 }}>{item.bot_reply}</div>
+                    {editing[item.id] !== undefined ? (
+                      <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+                        <textarea
+                          value={editing[item.id]}
+                          onChange={e => setEditing(prev => ({ ...prev, [item.id]: e.target.value }))}
+                          style={{
+                            flex: 1, fontSize: 14, padding: 8, borderRadius: 6,
+                            border: "1px solid #d1d5db", resize: "vertical", minHeight: 60,
+                            fontFamily: "inherit",
+                          }}
+                        />
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                          <button onClick={() => handleSaveEdit(item)} style={{
+                            padding: "4px 10px", background: "#dbeafe", border: "none",
+                            borderRadius: 4, cursor: "pointer", fontSize: 12, color: "#1d4ed8",
+                          }}>Salvar</button>
+                          <button onClick={() => setEditing(prev => { const n = { ...prev }; delete n[item.id]; return n; })} style={{
+                            padding: "4px 10px", background: "#f3f4f6", border: "none",
+                            borderRadius: 4, cursor: "pointer", fontSize: 12, color: "#666",
+                          }}>Cancelar</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 14, color: "#111", fontWeight: 500 }}>{item.bot_reply}</div>
+                    )}
                   </div>
+
+                  {/* Botoes de acao: Editar, Regenerar, Enviar */}
+                  {!item.reviewed && editing[item.id] === undefined && (
+                    <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+                      <button onClick={() => setEditing(prev => ({ ...prev, [item.id]: item.bot_reply }))} style={{
+                        padding: "4px 12px", background: "#f3f4f6", border: "1px solid #d1d5db",
+                        borderRadius: 4, cursor: "pointer", fontSize: 12, color: "#333",
+                      }}>Editar</button>
+                      <button onClick={() => handleRegenerate(item)} disabled={regenerating[item.id]} style={{
+                        padding: "4px 12px", background: "#fef3c7", border: "1px solid #fcd34d",
+                        borderRadius: 4, cursor: regenerating[item.id] ? "wait" : "pointer",
+                        fontSize: 12, color: "#92400e", opacity: regenerating[item.id] ? 0.6 : 1,
+                      }}>{regenerating[item.id] ? "Gerando..." : "Regenerar"}</button>
+                      <button onClick={() => handleSend(item)} disabled={sending[item.id]} style={{
+                        padding: "4px 12px", background: "#dcfce7", border: "1px solid #86efac",
+                        borderRadius: 4, cursor: sending[item.id] ? "wait" : "pointer",
+                        fontSize: 12, color: "#16a34a", fontWeight: 600, opacity: sending[item.id] ? 0.6 : 1,
+                      }}>{sending[item.id] ? "Enviando..." : "Enviar"}</button>
+                    </div>
+                  )}
+
+                  {/* Mensagem de acao */}
+                  {actionMsg[item.id] && (
+                    <div style={{
+                      fontSize: 12, marginBottom: 6, padding: "4px 8px", borderRadius: 4,
+                      background: actionMsg[item.id].type === "ok" ? "#f0fdf4" : "#fef2f2",
+                      color: actionMsg[item.id].type === "ok" ? "#16a34a" : "#dc2626",
+                    }}>
+                      {actionMsg[item.id].text}
+                    </div>
+                  )}
 
                   {item.reviewed ? (
                     <div style={{ fontSize: 12, color: "#16a34a" }}>
