@@ -6,6 +6,7 @@ const tabs = [
   { label: "Videos", href: "/admin" },
   { label: "Dashboard", href: "/admin/dashboard" },
   { label: "Moderacao", href: "/admin/moderation" },
+  { label: "Controle", href: "/admin/control" },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {

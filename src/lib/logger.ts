@@ -1,3 +1,8 @@
+import { EventEmitter } from "events";
+
+export const logEmitter = new EventEmitter();
+logEmitter.setMaxListeners(20);
+
 type EventType =
   | "webhook_received"
   | "processing_started"
@@ -68,4 +73,5 @@ export function log(type: EventType, data?: LogData) {
   }
 
   console.log(JSON.stringify(event));
+  logEmitter.emit("log", event);
 }

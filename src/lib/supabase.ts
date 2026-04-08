@@ -20,17 +20,21 @@ export async function saveFailedReply(
   replyType: "comment" | "dm" = "comment",
   mediaId?: string,
   scheduledAt?: Date,
+  originalText?: string,
 ): Promise<void> {
   try {
     const retryAt = scheduledAt
       ? `$6::timestamptz`
       : `now() + interval '1 minute'`;
-    const params = [commentId, username || null, message, replyType, mediaId || null];
+    const params: (string | null)[] = [commentId, username || null, message, replyType, mediaId || null];
     if (scheduledAt) params.push(scheduledAt.toISOString());
 
+    const otIdx = params.length + 1;
+    params.push(originalText || null);
+
     await pool.query(
-      `INSERT INTO failed_replies (comment_id, username, message, reply_type, media_id, next_retry_at)
-       VALUES ($1, $2, $3, $4, $5, ${retryAt})
+      `INSERT INTO failed_replies (comment_id, username, message, reply_type, media_id, next_retry_at, original_text)
+       VALUES ($1, $2, $3, $4, $5, ${retryAt}, $${otIdx})
        ON CONFLICT (comment_id) DO NOTHING`,
       params
     );
@@ -244,6 +248,25 @@ export async function cancelFollowUp(userId: string): Promise<void> {
     );
   } catch {}
 }
+
+// --- Bot Mode ---
+
+let _modeCache: { mode: string; ts: number } | null = null;
+const MODE_TTL = 10_000;
+
+export async function getBotMode(): Promise<string> {
+  if (_modeCache && Date.now() - _modeCache.ts < MODE_TTL) return _modeCache.mode;
+  try {
+    const { rows } = await pool.query("SELECT mode FROM bot_settings WHERE id = 1");
+    const mode = rows[0]?.mode || "automatico";
+    _modeCache = { mode, ts: Date.now() };
+    return mode;
+  } catch {
+    return "automatico";
+  }
+}
+
+export function invalidateModeCache() { _modeCache = null; }
 
 export { pool };
 

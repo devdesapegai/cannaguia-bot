@@ -10,7 +10,7 @@ import { isDuplicate, isOnCooldown } from "@/lib/dedup";
 import { canReply } from "@/lib/rate-limit";
 import { log } from "@/lib/logger";
 import { OWN_USERNAME } from "@/lib/constants";
-import { getVideoContext, saveFailedReply, logResponse, recordStat } from "@/lib/supabase";
+import { getVideoContext, saveFailedReply, logResponse, recordStat, getBotMode } from "@/lib/supabase";
 import { shouldSkip, EMOJI_ONLY_SKIP_RATE } from "@/lib/smart-skip";
 import { shouldSkipNight } from "@/lib/time-awareness";
 import { searchSimilar } from "@/lib/embeddings";
@@ -34,7 +34,8 @@ export async function GET(req: NextRequest) {
 export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
-  if (process.env.BOT_MAINTENANCE === "true") {
+  const botMode = await getBotMode();
+  if (botMode === "pausado") {
     return NextResponse.json({ status: "maintenance" }, { status: 200 });
   }
 
@@ -99,7 +100,7 @@ export async function POST(req: NextRequest) {
   // Processar em background com after() — retorna 200 imediatamente
   after(async () => {
     try {
-      await processWebhook(body);
+      await processWebhook(body, botMode);
     } catch (err) {
       log("error", { error: String(err) });
     }
@@ -108,7 +109,7 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ status: "ok" }, { status: 200 });
 }
 
-async function processWebhook(body: WebhookPayload) {
+async function processWebhook(body: WebhookPayload, botMode: string) {
   if (body.object !== "instagram") return;
 
   const entryCount = body.entry?.length || 0;
@@ -119,10 +120,10 @@ async function processWebhook(body: WebhookPayload) {
 
   for (const entry of body.entry || []) {
     // Processar DMs
-    await processMessaging(entry);
+    await processMessaging(entry, botMode);
 
     // Processar mentions
-    await processMentions(entry);
+    await processMentions(entry, botMode);
 
     // Processar comentarios
     for (const change of entry.changes || []) {
@@ -236,6 +237,14 @@ async function processWebhook(body: WebhookPayload) {
         continue;
       }
 
+      // Modo manual: salva na fila pra aprovacao ao inves de postar
+      if (botMode === "manual") {
+        await saveFailedReply(commentId, result.reply, from?.username, "comment", mediaId, undefined, text);
+        log("reply_scheduled", { comment_id: commentId, reason: "manual_mode" });
+        logResponse({ commentId, originalText: text, botReply: result.reply, category: result.category, mediaId, username: from?.username, replyType: "comment" });
+        continue;
+      }
+
       // Delay natural (distribuicao log-normal, mediana 90s)
       const mention = from?.username ? `@${from.username} ` : "";
       const delayMs = calculateDelay();
@@ -265,7 +274,7 @@ async function processWebhook(body: WebhookPayload) {
   }
 }
 
-async function processMentions(entry: WebhookEntry) {
+async function processMentions(entry: WebhookEntry, botMode: string) {
   for (const change of entry.changes || []) {
     if (change.field !== "mentions") continue;
 
@@ -307,6 +316,14 @@ async function processMentions(entry: WebhookEntry) {
 
     log("reply_generated", { comment_id: mentionKey, reply: reply.slice(0, 100) });
 
+    // Modo manual: salva na fila
+    if (botMode === "manual") {
+      await saveFailedReply(mentionKey, reply, username, "comment", mediaId, undefined, caption);
+      log("reply_scheduled", { comment_id: mentionKey, reason: "manual_mode" });
+      logResponse({ originalText: caption, botReply: reply, mediaId, username, replyType: "mention" });
+      continue;
+    }
+
     // Comentar no post
     const success = await commentOnMedia(mediaId, reply);
     if (success) {
@@ -323,7 +340,7 @@ async function processMentions(entry: WebhookEntry) {
   }
 }
 
-async function processMessaging(entry: WebhookEntry) {
+async function processMessaging(entry: WebhookEntry, botMode: string) {
   for (const msg of entry.messaging || []) {
     // Ignorar echos (mensagens enviadas por nos)
     if (msg.message?.is_echo) continue;
@@ -355,6 +372,14 @@ async function processMessaging(entry: WebhookEntry) {
     }
 
     log("reply_generated", { comment_id: msgId, reply: result.reply.slice(0, 100) });
+
+    // Modo manual: salva na fila
+    if (botMode === "manual") {
+      await saveFailedReply(msgId, result.reply, senderId, "dm", undefined, undefined, text);
+      log("reply_scheduled", { comment_id: msgId, reason: "manual_mode" });
+      logResponse({ commentId: msgId, originalText: text, botReply: result.reply, username: senderId, replyType: "dm" });
+      continue;
+    }
 
     // Enviar resposta (com ou sem botao WhatsApp)
     const success = result.whatsapp
