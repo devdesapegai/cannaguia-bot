@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { pool } from "@/lib/supabase";
+import { queryRetry } from "@/lib/supabase";
 
 export async function GET() {
   try {
     const [todayRes, categoriesRes, queueRes] = await Promise.all([
-      pool.query(
+      queryRetry(
         `SELECT
            COALESCE(SUM(replies_sent), 0) as sent,
            COALESCE(SUM(replies_failed), 0) as failed,
@@ -13,14 +13,14 @@ export async function GET() {
          FROM bot_stats
          WHERE hour_bucket >= date_trunc('day', now() AT TIME ZONE 'America/Sao_Paulo') AT TIME ZONE 'America/Sao_Paulo'`
       ),
-      pool.query(
+      queryRetry(
         `SELECT category, COUNT(*)::int as count
          FROM response_log
          WHERE created_at >= date_trunc('day', now() AT TIME ZONE 'America/Sao_Paulo') AT TIME ZONE 'America/Sao_Paulo'
            AND category IS NOT NULL
          GROUP BY category ORDER BY count DESC`
       ),
-      pool.query(
+      queryRetry(
         `SELECT
            COUNT(*)::int as total,
            COUNT(*) FILTER (WHERE attempts < max_attempts AND next_retry_at <= now())::int as pending,

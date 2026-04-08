@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { pool, logResponse, recordStat } from "@/lib/supabase";
+import { logResponse, recordStat, queryRetry } from "@/lib/supabase";
 import { replyToComment } from "@/lib/instagram";
 import { log } from "@/lib/logger";
 
 export async function GET() {
   try {
-    const { rows } = await pool.query(
+    const { rows } = await queryRetry(
       `SELECT id, comment_id, username, message, original_text, reply_type,
               media_id, attempts, max_attempts, created_at, next_retry_at
        FROM failed_replies
@@ -34,14 +34,14 @@ export async function POST(req: NextRequest) {
 
     switch (action) {
       case "approve": {
-        const { rows } = await pool.query("SELECT * FROM failed_replies WHERE id = $1", [id]);
+        const { rows } = await queryRetry("SELECT * FROM failed_replies WHERE id = $1", [id]);
         if (!rows[0]) return NextResponse.json({ error: "Not found" }, { status: 404 });
         const item = rows[0];
         const replyText = message || item.message;
         const mention = item.username ? `@${item.username} ` : "";
         const success = await replyToComment(item.comment_id, mention + replyText);
         if (success) {
-          await pool.query("DELETE FROM failed_replies WHERE id = $1", [id]);
+          await queryRetry("DELETE FROM failed_replies WHERE id = $1", [id]);
           log("reply_posted", { comment_id: item.comment_id, username: item.username, reply: replyText.slice(0, 100) });
           await logResponse({
             commentId: item.comment_id,
@@ -58,18 +58,18 @@ export async function POST(req: NextRequest) {
       }
 
       case "reject": {
-        await pool.query("DELETE FROM failed_replies WHERE id = $1", [id]);
+        await queryRetry("DELETE FROM failed_replies WHERE id = $1", [id]);
         return NextResponse.json({ ok: true });
       }
 
       case "edit": {
         if (!message) return NextResponse.json({ error: "Missing message" }, { status: 400 });
-        await pool.query("UPDATE failed_replies SET message = $2 WHERE id = $1", [id, message]);
+        await queryRetry("UPDATE failed_replies SET message = $2 WHERE id = $1", [id, message]);
         return NextResponse.json({ ok: true });
       }
 
       case "retry": {
-        await pool.query(
+        await queryRetry(
           "UPDATE failed_replies SET attempts = 0, next_retry_at = now() WHERE id = $1",
           [id]
         );
@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
       }
 
       case "pause": {
-        await pool.query(
+        await queryRetry(
           "UPDATE failed_replies SET next_retry_at = now() + interval '100 years' WHERE id = $1",
           [id]
         );
@@ -85,7 +85,7 @@ export async function POST(req: NextRequest) {
       }
 
       case "resume": {
-        await pool.query(
+        await queryRetry(
           "UPDATE failed_replies SET next_retry_at = now() WHERE id = $1",
           [id]
         );

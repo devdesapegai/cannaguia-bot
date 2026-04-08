@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { pool, getBotMode, invalidateModeCache } from "@/lib/supabase";
+import { getBotMode, invalidateModeCache, queryRetry } from "@/lib/supabase";
 
 const VALID_MODES = ["automatico", "manual", "pausado"];
 
@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
     if (!VALID_MODES.includes(mode)) {
       return NextResponse.json({ error: "Invalid mode" }, { status: 400 });
     }
-    await pool.query(
+    await queryRetry(
       "UPDATE bot_settings SET mode = $1, updated_at = now() WHERE id = 1",
       [mode]
     );

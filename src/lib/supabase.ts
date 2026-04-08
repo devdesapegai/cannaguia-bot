@@ -1,6 +1,14 @@
 import { pool } from "@/lib/db";
 import { embedAndStore } from "@/lib/embeddings";
 
+export async function queryRetry(text: string, params?: unknown[]) {
+  try {
+    return await pool.query(text, params);
+  } catch {
+    return await pool.query(text, params);
+  }
+}
+
 export async function getVideoContext(mediaId: string): Promise<string> {
   try {
     const { rows } = await pool.query(
@@ -257,7 +265,7 @@ const MODE_TTL = 10_000;
 export async function getBotMode(): Promise<string> {
   if (_modeCache && Date.now() - _modeCache.ts < MODE_TTL) return _modeCache.mode;
   try {
-    const { rows } = await pool.query("SELECT mode FROM bot_settings WHERE id = 1");
+    const { rows } = await queryRetry("SELECT mode FROM bot_settings WHERE id = 1");
     const mode = rows[0]?.mode || "automatico";
     _modeCache = { mode, ts: Date.now() };
     return mode;
