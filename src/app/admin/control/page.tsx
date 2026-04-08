@@ -17,30 +17,6 @@ type LogEvent = {
   [key: string]: unknown;
 };
 
-type QueueItem = {
-  id: number;
-  comment_id: string;
-  username: string | null;
-  message: string;
-  original_text: string | null;
-  reply_type: string;
-  media_id: string | null;
-  attempts: number;
-  max_attempts: number;
-  created_at: string;
-  next_retry_at: string;
-  media_title: string | null;
-  media_permalink: string | null;
-  parent_id: string | null;
-  has_video_context: boolean | null;
-};
-
-type QueueContext = {
-  comments: Array<{ username: string; text: string; isOwn?: boolean }>;
-  caption: string | null;
-  videoContext: string | null;
-};
-
 type ResponseItem = {
   id: number;
   comment_id: string | null;
@@ -64,10 +40,9 @@ type Stats = {
 // --- Helpers ---
 
 const LOG_COLORS: Record<string, string> = {
-  reply_posted: "#22c55e", dm_sent: "#22c55e", mention_replied: "#22c55e",
-  reply_generated: "#f59e0b", reply_scheduled: "#f59e0b", comment_classified: "#f59e0b",
-  cooldown_skipped: "#f59e0b", rate_limited: "#f59e0b",
-  error: "#ef4444", reply_failed: "#ef4444", signature_invalid: "#ef4444",
+  dm_sent: "#22c55e", reply_generated: "#f59e0b",
+  rate_limited: "#f59e0b", error: "#ef4444",
+  reply_failed: "#ef4444", signature_invalid: "#ef4444",
 };
 
 function logColor(type: string): string {
@@ -86,14 +61,6 @@ function formatLogLine(ev: LogEvent): string {
   return `[${time}] ${ev.t}: ${parts.join(" ")}`;
 }
 
-function queueStatus(item: QueueItem): { label: string; color: string; bg: string } {
-  if (item.attempts >= item.max_attempts) return { label: "Esgotado", color: "#666", bg: "#f3f4f6" };
-  const retryAt = new Date(item.next_retry_at).getTime();
-  if (retryAt > Date.now() + 50 * 365 * 24 * 60 * 60 * 1000) return { label: "Pausado", color: "#f59e0b", bg: "#fef3c7" };
-  if (retryAt > Date.now()) return { label: "Agendado", color: "#7c3aed", bg: "#ede9fe" };
-  return { label: "Pendente", color: "#2563eb", bg: "#dbeafe" };
-}
-
 const MODE_CONFIG = {
   automatico: { label: "Automatico", color: "#16a34a", bg: "#dcfce7", border: "#bbf7d0" },
   manual: { label: "Manual", color: "#f59e0b", bg: "#fef3c7", border: "#fde68a" },
@@ -103,34 +70,13 @@ const MODE_CONFIG = {
 // --- Component ---
 
 export default function ControlPage() {
-  // Mode
   const [mode, setMode] = useState<string>("automatico");
   const [modeLoading, setModeLoading] = useState(false);
-
-  // Stats
   const [stats, setStats] = useState<Stats | null>(null);
-
-  // Logs
   const [logs, setLogs] = useState<LogEvent[]>([]);
   const [autoScroll, setAutoScroll] = useState(true);
   const logsRef = useRef<HTMLDivElement>(null);
-
-  // Queue
-  const [queue, setQueue] = useState<QueueItem[]>([]);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [editText, setEditText] = useState("");
-  const [queueLoading, setQueueLoading] = useState<Record<number, boolean>>({});
-  const [regenerating, setRegenerating] = useState<Record<number, boolean>>({});
-  const [contextOpen, setContextOpen] = useState<Record<number, boolean>>({});
-  const [contextData, setContextData] = useState<Record<number, QueueContext>>({});
-  const [contextLoading, setContextLoading] = useState<Record<number, boolean>>({});
-
-  // Responses
   const [responses, setResponses] = useState<ResponseItem[]>([]);
-  const [editingRespId, setEditingRespId] = useState<number | null>(null);
-  const [editRespText, setEditRespText] = useState("");
-
-  // Error
   const [error, setError] = useState<string | null>(null);
 
   // --- Fetch helpers ---
@@ -149,13 +95,6 @@ export default function ControlPage() {
     } catch {}
   }, []);
 
-  const fetchQueue = useCallback(async () => {
-    try {
-      const res = await fetch("/api/admin/control/queue");
-      if (res.ok) { const d = await res.json(); setQueue(d.data || []); }
-    } catch {}
-  }, []);
-
   const fetchResponses = useCallback(async () => {
     try {
       const res = await fetch("/api/admin/control/responses");
@@ -163,24 +102,16 @@ export default function ControlPage() {
     } catch {}
   }, []);
 
-  // --- Initial load + polling ---
-
   useEffect(() => {
     fetchMode();
     fetchStats();
-    fetchQueue();
     fetchResponses();
-  }, [fetchMode, fetchStats, fetchQueue, fetchResponses]);
+  }, [fetchMode, fetchStats, fetchResponses]);
 
   useEffect(() => {
     const i = setInterval(fetchStats, 30_000);
     return () => clearInterval(i);
   }, [fetchStats]);
-
-  useEffect(() => {
-    const i = setInterval(fetchQueue, 10_000);
-    return () => clearInterval(i);
-  }, [fetchQueue]);
 
   useEffect(() => {
     const i = setInterval(fetchResponses, 30_000);
@@ -226,109 +157,6 @@ export default function ControlPage() {
     }
   }
 
-  async function queueAction(id: number, action: string, message?: string) {
-    setQueueLoading(prev => ({ ...prev, [id]: true }));
-    try {
-      const res = await fetch("/api/admin/control/queue", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, id, message }),
-      });
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        setError(d.error || `Erro ${res.status}`);
-      } else {
-        fetchQueue();
-        if (action === "approve") fetchResponses();
-      }
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setQueueLoading(prev => ({ ...prev, [id]: false }));
-      if (action === "approve" || action === "reject") setEditingId(null);
-    }
-  }
-
-  async function toggleContext(item: QueueItem) {
-    if (contextOpen[item.id]) {
-      setContextOpen(prev => ({ ...prev, [item.id]: false }));
-      return;
-    }
-    // Ja tem dados? so abre
-    if (contextData[item.id]) {
-      setContextOpen(prev => ({ ...prev, [item.id]: true }));
-      return;
-    }
-    // Buscar contexto
-    setContextLoading(prev => ({ ...prev, [item.id]: true }));
-    try {
-      const params = new URLSearchParams();
-      if (item.media_id) params.set("media_id", item.media_id);
-      if (item.comment_id) params.set("comment_id", item.comment_id);
-      const res = await fetch(`/api/admin/control/queue/context?${params}`);
-      if (res.ok) {
-        const data = await res.json();
-        setContextData(prev => ({ ...prev, [item.id]: data }));
-      }
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setContextLoading(prev => ({ ...prev, [item.id]: false }));
-      setContextOpen(prev => ({ ...prev, [item.id]: true }));
-    }
-  }
-
-  async function regenerateQueue(item: QueueItem) {
-    setRegenerating(prev => ({ ...prev, [item.id]: true }));
-    try {
-      const res = await fetch("/api/admin/control/queue", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "regenerate", id: item.id }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Erro ao regenerar");
-      // Atualizar mensagem no item da fila
-      setQueue(prev => prev.map(q => q.id === item.id ? { ...q, message: data.reply } : q));
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setRegenerating(prev => ({ ...prev, [item.id]: false }));
-    }
-  }
-
-  async function deleteResponse(id: number) {
-    try {
-      const res = await fetch("/api/admin/control/responses", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id }),
-      });
-      if (res.ok) setResponses(prev => prev.filter(r => r.id !== id));
-      else setError("Erro ao excluir");
-    } catch (e) {
-      setError(String(e));
-    }
-  }
-
-  async function editResponse(id: number) {
-    if (!editRespText.trim()) return;
-    try {
-      const res = await fetch("/api/admin/control/responses", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, bot_reply: editRespText }),
-      });
-      if (res.ok) {
-        setResponses(prev => prev.map(r => r.id === id ? { ...r, bot_reply: editRespText } : r));
-        setEditingRespId(null);
-        setEditRespText("");
-      } else setError("Erro ao editar");
-    } catch (e) {
-      setError(String(e));
-    }
-  }
-
   // --- Render ---
 
   return (
@@ -342,9 +170,8 @@ export default function ControlPage() {
 
       {/* ===== MODO + STATS ===== */}
       <div style={{ display: "flex", gap: 16, marginBottom: 24, flexWrap: "wrap" }}>
-        {/* Mode toggle */}
         <div style={{ flex: "0 0 auto" }}>
-          <div style={{ fontSize: 12, color: "#666", marginBottom: 8 }}>Modo do Bot</div>
+          <div style={{ fontSize: 12, color: "#666", marginBottom: 8 }}>Modo do Bot (DMs)</div>
           <div style={{ display: "flex", gap: 4 }}>
             {(Object.keys(MODE_CONFIG) as Array<keyof typeof MODE_CONFIG>).map(m => {
               const cfg = MODE_CONFIG[m];
@@ -367,15 +194,13 @@ export default function ControlPage() {
           </div>
         </div>
 
-        {/* Stats cards */}
         {stats && (
           <div style={{ display: "flex", gap: 8, flex: 1, flexWrap: "wrap" }}>
             {[
-              { label: "Respostas", value: stats.today.sent, color: "#16a34a" },
+              { label: "DMs Enviadas", value: stats.today.sent, color: "#16a34a" },
               { label: "Falhas", value: stats.today.failed, color: "#dc2626" },
               { label: "Webhooks", value: stats.today.webhooks, color: "#2563eb" },
               { label: "Erros", value: stats.today.errors, color: "#f59e0b" },
-              { label: "Na Fila", value: stats.queue.total, color: "#7c3aed" },
             ].map(card => (
               <div key={card.label} style={{
                 flex: "1 1 100px", padding: "12px 16px", borderRadius: 8, border: "1px solid #e5e7eb",
@@ -388,17 +213,6 @@ export default function ControlPage() {
           </div>
         )}
       </div>
-
-      {/* Categories */}
-      {stats && stats.categories.length > 0 && (
-        <div style={{ display: "flex", gap: 6, marginBottom: 20, flexWrap: "wrap" }}>
-          {stats.categories.map(c => (
-            <span key={c.category} style={{ padding: "3px 10px", borderRadius: 12, background: "#dbeafe", color: "#1d4ed8", fontSize: 12 }}>
-              {c.category}: {c.count}
-            </span>
-          ))}
-        </div>
-      )}
 
       {/* ===== LOGS ===== */}
       <div style={{ marginBottom: 24 }}>
@@ -435,202 +249,7 @@ export default function ControlPage() {
         </div>
       </div>
 
-      {/* ===== FILA ===== */}
-      <div style={{ marginBottom: 24 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: "#333" }}>
-            Fila de Mensagens ({queue.length})
-          </div>
-          <button onClick={fetchQueue} style={{
-            padding: "4px 12px", borderRadius: 6, border: "1px solid #d1d5db", background: "#fff",
-            color: "#333", fontSize: 12, cursor: "pointer",
-          }}>
-            Atualizar
-          </button>
-        </div>
-
-        {queue.length === 0 ? (
-          <div style={{ textAlign: "center", padding: 32, color: "#999", background: "#f9fafb", borderRadius: 8 }}>
-            Nenhuma mensagem na fila
-          </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {queue.map(item => {
-              const st = queueStatus(item);
-              const isEditing = editingId === item.id;
-              const loading = queueLoading[item.id];
-
-              return (
-                <div key={item.id} style={{
-                  border: "1px solid #e5e7eb", borderRadius: 8, padding: 14, background: "#fff",
-                }}>
-                  {/* Header */}
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      {item.username && <span style={{ fontSize: 13, fontWeight: 500 }}>@{item.username}</span>}
-                      <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11, background: st.bg, color: st.color }}>{st.label}</span>
-                      <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11, background: "#f3f4f6", color: "#666" }}>{item.reply_type}</span>
-                      {item.media_permalink && (
-                        <a href={item.media_permalink} target="_blank" rel="noopener noreferrer"
-                          style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11, background: "#fef3c7", color: "#92400e", textDecoration: "none" }}>
-                          {item.media_title || "ver post"}
-                        </a>
-                      )}
-                      <span style={{ fontSize: 11, color: "#999" }}>{item.attempts}/{item.max_attempts}</span>
-                      {/* Badge: subcomentario ou 1o comentario */}
-                      {item.parent_id ? (
-                        <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11, background: "#fae8ff", color: "#a21caf" }}>Subcomentario</span>
-                      ) : (
-                        <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11, background: "#ecfdf5", color: "#059669" }}>1o comentario</span>
-                      )}
-                      {/* Badge: video context */}
-                      {item.has_video_context ? (
-                        <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11, background: "#dbeafe", color: "#2563eb" }}>com contexto</span>
-                      ) : (
-                        <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11, background: "#fee2e2", color: "#dc2626" }}>sem contexto</span>
-                      )}
-                    </div>
-                    <span style={{ fontSize: 11, color: "#999" }}>
-                      {new Date(item.created_at).toLocaleString("pt-BR")}
-                    </span>
-                  </div>
-
-                  {/* Botao ver contexto */}
-                  <div style={{ marginBottom: 8 }}>
-                    <button onClick={() => toggleContext(item)} disabled={contextLoading[item.id]}
-                      style={{
-                        padding: "3px 10px", background: "none", border: "1px solid #d1d5db",
-                        borderRadius: 4, cursor: "pointer", fontSize: 11, color: "#666",
-                      }}>
-                      {contextLoading[item.id] ? "Carregando..." : contextOpen[item.id] ? "Fechar contexto" : "Ver contexto"}
-                    </button>
-                  </div>
-
-                  {/* Painel de contexto expandido */}
-                  {contextOpen[item.id] && contextData[item.id] && (
-                    <div style={{
-                      background: "#f9fafb", borderRadius: 6, padding: 10, marginBottom: 8,
-                      border: "1px solid #e5e7eb", fontSize: 12,
-                    }}>
-                      {contextData[item.id].caption && (
-                        <div style={{ marginBottom: 6 }}>
-                          <span style={{ color: "#999" }}>Caption: </span>
-                          <span style={{ color: "#333" }}>{contextData[item.id].caption!.slice(0, 150)}</span>
-                        </div>
-                      )}
-                      {contextData[item.id].videoContext && (
-                        <div style={{ marginBottom: 6 }}>
-                          <span style={{ color: "#2563eb" }}>Contexto do video: </span>
-                          <span style={{ color: "#333" }}>{contextData[item.id].videoContext}</span>
-                        </div>
-                      )}
-                      {contextData[item.id].comments.length > 0 ? (
-                        <div>
-                          <div style={{ color: "#999", marginBottom: 4 }}>Comentarios recentes no post:</div>
-                          {contextData[item.id].comments.map((c, i) => (
-                            <div key={i} style={{
-                              padding: "3px 0", borderBottom: i < contextData[item.id].comments.length - 1 ? "1px solid #e5e7eb" : "none",
-                              color: c.isOwn ? "#16a34a" : "#333",
-                            }}>
-                              <span style={{ fontWeight: 500 }}>@{c.username}{c.isOwn ? " (Maria)" : ""}: </span>
-                              {c.text.slice(0, 100)}
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div style={{ color: "#999" }}>Nenhum comentario encontrado no post</div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Content */}
-                  {item.original_text && (
-                    <div style={{ marginBottom: 6 }}>
-                      <span style={{ fontSize: 11, color: "#999" }}>Comentario: </span>
-                      <span style={{ fontSize: 13, color: "#333" }}>{item.original_text.slice(0, 120)}</span>
-                    </div>
-                  )}
-                  <div style={{ marginBottom: 8 }}>
-                    <span style={{ fontSize: 11, color: "#999" }}>Resposta: </span>
-                    <span style={{ fontSize: 13, color: "#111", fontWeight: 500 }}>{item.message}</span>
-                  </div>
-
-                  {/* Edit area */}
-                  {isEditing && (
-                    <div style={{ marginBottom: 8 }}>
-                      <textarea value={editText} onChange={e => setEditText(e.target.value)}
-                        style={{
-                          width: "100%", minHeight: 60, padding: 8, borderRadius: 6, border: "1px solid #d1d5db",
-                          fontSize: 13, fontFamily: "system-ui", resize: "vertical",
-                        }}
-                      />
-                      <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                        <button onClick={() => queueAction(item.id, "approve", editText)} disabled={loading}
-                          style={{ padding: "4px 14px", background: "#dcfce7", color: "#16a34a", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 13 }}>
-                          {loading ? "Enviando..." : "Enviar editado"}
-                        </button>
-                        <button onClick={() => queueAction(item.id, "edit", editText)} disabled={loading}
-                          style={{ padding: "4px 14px", background: "#dbeafe", color: "#2563eb", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 13 }}>
-                          Salvar sem enviar
-                        </button>
-                        <button onClick={() => setEditingId(null)}
-                          style={{ padding: "4px 14px", background: "#f3f4f6", color: "#666", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 13 }}>
-                          Cancelar
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Action buttons */}
-                  {!isEditing && (
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      <button onClick={() => queueAction(item.id, "approve")} disabled={loading}
-                        style={{ padding: "4px 14px", background: "#dcfce7", color: "#16a34a", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>
-                        {loading ? "..." : "Enviar"}
-                      </button>
-                      <button onClick={() => { setEditingId(item.id); setEditText(item.message); }}
-                        style={{ padding: "4px 14px", background: "#dbeafe", color: "#2563eb", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>
-                        Editar
-                      </button>
-                      <button onClick={() => regenerateQueue(item)} disabled={regenerating[item.id]}
-                        style={{
-                          padding: "4px 14px", background: "#fef3c7", border: "1px solid #fcd34d",
-                          borderRadius: 4, cursor: regenerating[item.id] ? "wait" : "pointer",
-                          fontSize: 12, color: "#92400e", opacity: regenerating[item.id] ? 0.6 : 1,
-                        }}>
-                        {regenerating[item.id] ? "Gerando..." : "Regenerar"}
-                      </button>
-                      {st.label === "Pausado" ? (
-                        <button onClick={() => queueAction(item.id, "resume")} disabled={loading}
-                          style={{ padding: "4px 14px", background: "#fef3c7", color: "#f59e0b", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>
-                          Retomar
-                        </button>
-                      ) : (
-                        <button onClick={() => queueAction(item.id, "pause")} disabled={loading}
-                          style={{ padding: "4px 14px", background: "#f3f4f6", color: "#666", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>
-                          Pausar
-                        </button>
-                      )}
-                      {item.attempts > 0 && st.label !== "Esgotado" ? null : item.attempts >= item.max_attempts && (
-                        <button onClick={() => queueAction(item.id, "retry")} disabled={loading}
-                          style={{ padding: "4px 14px", background: "#ffedd5", color: "#ea580c", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>
-                          Reenviar
-                        </button>
-                      )}
-                      <button onClick={() => queueAction(item.id, "reject")} disabled={loading}
-                        style={{ padding: "4px 14px", background: "#fee2e2", color: "#dc2626", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>
-                        Excluir
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* ===== ULTIMAS RESPOSTAS ===== */}
+      {/* ===== ULTIMAS RESPOSTAS (DMs) ===== */}
       <div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: "#333" }}>
@@ -650,71 +269,28 @@ export default function ControlPage() {
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {responses.map(item => {
-              const isEditing = editingRespId === item.id;
-
-              return (
-                <div key={item.id} style={{
-                  border: "1px solid #e5e7eb", borderRadius: 8, padding: 14, background: "#fff",
-                }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      {item.username && <span style={{ fontSize: 13, fontWeight: 500 }}>@{item.username}</span>}
-                      <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11, background: "#f3f4f6", color: "#666" }}>{item.reply_type}</span>
-                      {item.category && <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11, background: "#dbeafe", color: "#1d4ed8" }}>{item.category}</span>}
-                      {item.media_permalink && (
-                        <a href={item.media_permalink} target="_blank" rel="noopener noreferrer"
-                          style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11, background: "#fef3c7", color: "#92400e", textDecoration: "none" }}>
-                          {item.media_title || "ver post"}
-                        </a>
-                      )}
-                    </div>
-                    <span style={{ fontSize: 11, color: "#999" }}>{new Date(item.created_at).toLocaleString("pt-BR")}</span>
+            {responses.map(item => (
+              <div key={item.id} style={{
+                border: "1px solid #e5e7eb", borderRadius: 8, padding: 14, background: "#fff",
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    {item.username && <span style={{ fontSize: 13, fontWeight: 500 }}>@{item.username}</span>}
+                    <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11, background: "#f3f4f6", color: "#666" }}>{item.reply_type}</span>
+                    {item.category && <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11, background: "#dbeafe", color: "#1d4ed8" }}>{item.category}</span>}
                   </div>
-
-                  <div style={{ marginBottom: 4 }}>
-                    <span style={{ fontSize: 11, color: "#999" }}>Comentario: </span>
-                    <span style={{ fontSize: 13, color: "#333" }}>{item.original_text?.slice(0, 120)}</span>
-                  </div>
-                  <div style={{ marginBottom: 8 }}>
-                    <span style={{ fontSize: 11, color: "#999" }}>Resposta: </span>
-                    <span style={{ fontSize: 13, color: "#111", fontWeight: 500 }}>{item.bot_reply}</span>
-                  </div>
-
-                  {isEditing ? (
-                    <div style={{ marginBottom: 6 }}>
-                      <textarea value={editRespText} onChange={e => setEditRespText(e.target.value)}
-                        style={{
-                          width: "100%", minHeight: 50, padding: 8, borderRadius: 6, border: "1px solid #d1d5db",
-                          fontSize: 13, fontFamily: "system-ui", resize: "vertical",
-                        }}
-                      />
-                      <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                        <button onClick={() => editResponse(item.id)}
-                          style={{ padding: "4px 14px", background: "#dcfce7", color: "#16a34a", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>
-                          Salvar
-                        </button>
-                        <button onClick={() => { setEditingRespId(null); setEditRespText(""); }}
-                          style={{ padding: "4px 14px", background: "#f3f4f6", color: "#666", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>
-                          Cancelar
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button onClick={() => { setEditingRespId(item.id); setEditRespText(item.bot_reply); }}
-                        style={{ padding: "4px 14px", background: "#dbeafe", color: "#2563eb", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>
-                        Editar
-                      </button>
-                      <button onClick={() => deleteResponse(item.id)}
-                        style={{ padding: "4px 14px", background: "#fee2e2", color: "#dc2626", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>
-                        Excluir
-                      </button>
-                    </div>
-                  )}
+                  <span style={{ fontSize: 11, color: "#999" }}>{new Date(item.created_at).toLocaleString("pt-BR")}</span>
                 </div>
-              );
-            })}
+                <div style={{ marginBottom: 4 }}>
+                  <span style={{ fontSize: 11, color: "#999" }}>Mensagem: </span>
+                  <span style={{ fontSize: 13, color: "#333" }}>{item.original_text?.slice(0, 120)}</span>
+                </div>
+                <div>
+                  <span style={{ fontSize: 11, color: "#999" }}>Resposta: </span>
+                  <span style={{ fontSize: 13, color: "#111", fontWeight: 500 }}>{item.bot_reply}</span>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>

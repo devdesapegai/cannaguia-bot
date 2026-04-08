@@ -1,20 +1,9 @@
 import { log } from "./logger";
-import { OWN_USERNAME } from "./constants";
 
 const GRAPH_URL = "https://graph.instagram.com/v21.0";
 
 const captionCache = new Map<string, { caption: string; ts: number }>();
 const CAPTION_CACHE_TTL = 60 * 60 * 1000; // 1 hora
-
-const commentsCache = new Map<string, { comments: Array<{ id: string; username: string; text: string }>; ts: number }>();
-const COMMENTS_CACHE_TTL = 5 * 60 * 1000; // 5 minutos
-
-function authHeaders(token: string): Record<string, string> {
-  return {
-    "Authorization": `Bearer ${token}`,
-    "Content-Type": "application/json",
-  };
-}
 
 async function fetchWithRetry(url: string, options: RequestInit, retries = 3, attempt = 0): Promise<Response> {
   const res = await fetch(url, options);
@@ -29,7 +18,7 @@ async function fetchWithRetry(url: string, options: RequestInit, retries = 3, at
 
   const retryableCodes = [1, 2, 4, 17];
   if (retries > 0 && retryableCodes.includes(errorCode)) {
-    const delay = 2000 * Math.pow(2, attempt); // 2s, 4s, 8s
+    const delay = 2000 * Math.pow(2, attempt);
     log("error", { error: `Retrying after error code ${errorCode}, attempt ${attempt + 1}, waiting ${delay / 1000}s` });
     await new Promise(r => setTimeout(r, delay));
     return fetchWithRetry(url, options, retries - 1, attempt + 1);
@@ -37,91 +26,6 @@ async function fetchWithRetry(url: string, options: RequestInit, retries = 3, at
 
   log("error", { error: `Instagram API error ${errorCode}: ${errorText.slice(0, 200)}` });
   return res;
-}
-
-export async function hasAlreadyReplied(commentId: string): Promise<boolean> {
-  const token = process.env.INSTAGRAM_ACCESS_TOKEN;
-  if (!token) return false;
-
-  try {
-    const res = await fetchWithRetry(`${GRAPH_URL}/${commentId}/replies?fields=from`, {
-      headers: { "Authorization": `Bearer ${token}` },
-    });
-    if (!res.ok) return false;
-    const data = await res.json();
-    return (data.data || []).some((r: { from?: { username?: string } }) =>
-      r.from?.username === OWN_USERNAME
-    );
-  } catch {
-    return false;
-  }
-}
-
-export async function replyToComment(commentId: string, message: string): Promise<boolean> {
-  const token = process.env.INSTAGRAM_ACCESS_TOKEN;
-  if (!token) { log("error", { error: "INSTAGRAM_ACCESS_TOKEN not set" }); return false; }
-
-  const res = await fetchWithRetry(`${GRAPH_URL}/${commentId}/replies`, {
-    method: "POST",
-    headers: authHeaders(token),
-    body: JSON.stringify({ message }),
-  });
-
-  return res.ok;
-}
-
-export async function hideComment(commentId: string): Promise<boolean> {
-  const token = process.env.INSTAGRAM_ACCESS_TOKEN;
-  if (!token) return false;
-
-  const res = await fetchWithRetry(`${GRAPH_URL}/${commentId}`, {
-    method: "POST",
-    headers: authHeaders(token),
-    body: JSON.stringify({ hide: true }),
-  });
-
-  return res.ok;
-}
-
-export async function getMediaComments(
-  mediaId: string,
-  excludeCommentId?: string,
-): Promise<Array<{ username: string; text: string }>> {
-  const token = process.env.INSTAGRAM_ACCESS_TOKEN;
-  if (!token) return [];
-
-  const cached = commentsCache.get(mediaId);
-  if (cached && Date.now() - cached.ts < COMMENTS_CACHE_TTL) {
-    if (excludeCommentId) {
-      return cached.comments.filter(c => c.id !== excludeCommentId);
-    }
-    return cached.comments;
-  }
-
-  try {
-    const res = await fetchWithRetry(
-      `${GRAPH_URL}/${mediaId}/comments?fields=id,text,username,timestamp&limit=10`,
-      { headers: { "Authorization": `Bearer ${token}` } },
-    );
-    if (!res.ok) return [];
-    const data = await res.json();
-    const allComments: Array<{ id: string; username: string; text: string }> = (data.data || [])
-      .filter((c: { username?: string }) => c.username !== OWN_USERNAME)
-      .map((c: { id?: string; username?: string; text?: string }) => ({
-        id: c.id || "",
-        username: c.username || "",
-        text: c.text || "",
-      }));
-
-    commentsCache.set(mediaId, { comments: allComments, ts: Date.now() });
-
-    if (excludeCommentId) {
-      return allComments.filter(c => c.id !== excludeCommentId);
-    }
-    return allComments;
-  } catch {
-    return [];
-  }
 }
 
 export async function getMediaCaption(mediaId: string): Promise<string> {
