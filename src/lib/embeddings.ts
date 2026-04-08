@@ -46,26 +46,39 @@ export async function searchSimilar(
   limit = 5,
 ): Promise<SimilarComment[]> {
   try {
-    const embedding = await embedText(text);
-    if (!embedding) return [];
-
-    const vectorStr = `[${embedding.join(",")}]`;
-    const { rows } = await pool.query(
-      `SELECT original_text, bot_reply, media_id, category,
-              1 - (embedding <=> $1::vector) as similarity
-       FROM response_log
-       WHERE embedding IS NOT NULL
-         AND media_id != $2
-         AND created_at > now() - interval '30 days'
-         AND 1 - (embedding <=> $1::vector) > 0.4
-       ORDER BY embedding <=> $1::vector
-       LIMIT $3`,
-      [vectorStr, excludeMediaId, limit],
-    );
-
-    return rows.filter((r: SimilarComment) => r.similarity >= 0.4);
+    // Timeout de 5s — se RAG demora, segue sem
+    const result = await Promise.race([
+      searchSimilarInner(text, excludeMediaId, limit),
+      new Promise<SimilarComment[]>((resolve) => setTimeout(() => resolve([]), 5000)),
+    ]);
+    return result;
   } catch (e) {
     console.error("[embeddings] searchSimilar error:", e);
     return [];
   }
+}
+
+async function searchSimilarInner(
+  text: string,
+  excludeMediaId: string,
+  limit: number,
+): Promise<SimilarComment[]> {
+  const embedding = await embedText(text);
+  if (!embedding) return [];
+
+  const vectorStr = `[${embedding.join(",")}]`;
+  const { rows } = await pool.query(
+    `SELECT original_text, bot_reply, media_id, category,
+            1 - (embedding <=> $1::vector) as similarity
+     FROM response_log
+     WHERE embedding IS NOT NULL
+       AND media_id != $2
+       AND created_at > now() - interval '30 days'
+       AND 1 - (embedding <=> $1::vector) > 0.4
+     ORDER BY embedding <=> $1::vector
+     LIMIT $3`,
+    [vectorStr, excludeMediaId, limit],
+  );
+
+  return rows.filter((r: SimilarComment) => r.similarity >= 0.4);
 }
