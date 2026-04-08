@@ -9,11 +9,12 @@ function getPool(): pg.Pool {
     _pool = new pg.Pool({
       connectionString: url,
       ssl: { rejectUnauthorized: false },
-      max: 1,
+      max: 3,
       connectionTimeoutMillis: 10000,
-      idleTimeoutMillis: 5000,
+      idleTimeoutMillis: 10000,
     });
-    _pool.on("error", () => {
+    _pool.on("error", (err) => {
+      console.warn("[db] pool error, resetting:", err.message);
       _pool = null;
     });
   }
