@@ -6,10 +6,12 @@ import { log } from "@/lib/logger";
 export async function GET() {
   try {
     const { rows } = await queryRetry(
-      `SELECT id, comment_id, username, message, original_text, reply_type,
-              media_id, attempts, max_attempts, created_at, next_retry_at
-       FROM failed_replies
-       ORDER BY created_at DESC
+      `SELECT fr.id, fr.comment_id, fr.username, fr.message, fr.original_text, fr.reply_type,
+              fr.media_id, fr.attempts, fr.max_attempts, fr.created_at, fr.next_retry_at,
+              vc.title as media_title, vc.url as media_permalink
+       FROM failed_replies fr
+       LEFT JOIN video_contexts vc ON fr.media_id = vc.media_id
+       ORDER BY fr.created_at DESC
        LIMIT 100`
     );
     return NextResponse.json({ data: rows });

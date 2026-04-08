@@ -4,9 +4,12 @@ import { queryRetry } from "@/lib/supabase";
 export async function GET() {
   try {
     const { rows } = await queryRetry(
-      `SELECT id, comment_id, original_text, bot_reply, category, username, reply_type, created_at
-       FROM response_log
-       ORDER BY created_at DESC
+      `SELECT rl.id, rl.comment_id, rl.original_text, rl.bot_reply, rl.category,
+              rl.username, rl.reply_type, rl.created_at, rl.media_id,
+              vc.title as media_title, vc.url as media_permalink
+       FROM response_log rl
+       LEFT JOIN video_contexts vc ON rl.media_id = vc.media_id
+       ORDER BY rl.created_at DESC
        LIMIT 20`
     );
     return NextResponse.json({ data: rows });

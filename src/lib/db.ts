@@ -11,12 +11,24 @@ function getPool(): pg.Pool {
       ssl: { rejectUnauthorized: false },
       max: 3,
       connectionTimeoutMillis: 10000,
-      idleTimeoutMillis: 10000,
+      idleTimeoutMillis: 30000,
+      allowExitOnIdle: false,
     });
     _pool.on("error", (err) => {
       console.warn("[db] pool error, resetting:", err.message);
+      try { _pool?.end().catch(() => {}); } catch {}
       _pool = null;
     });
+    // Keepalive: pinga o banco a cada 60s pra detectar conexoes mortas
+    const keepalive = setInterval(() => {
+      if (!_pool) { clearInterval(keepalive); return; }
+      _pool.query("SELECT 1").catch(() => {
+        console.warn("[db] keepalive failed, resetting pool");
+        try { _pool?.end().catch(() => {}); } catch {}
+        _pool = null;
+        clearInterval(keepalive);
+      });
+    }, 60_000);
   }
   return _pool;
 }

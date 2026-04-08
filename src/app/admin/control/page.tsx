@@ -29,6 +29,8 @@ type QueueItem = {
   max_attempts: number;
   created_at: string;
   next_retry_at: string;
+  media_title: string | null;
+  media_permalink: string | null;
 };
 
 type ResponseItem = {
@@ -40,6 +42,9 @@ type ResponseItem = {
   username: string | null;
   reply_type: string;
   created_at: string;
+  media_id: string | null;
+  media_title: string | null;
+  media_permalink: string | null;
 };
 
 type Stats = {
@@ -405,6 +410,12 @@ export default function ControlPage() {
                       {item.username && <span style={{ fontSize: 13, fontWeight: 500 }}>@{item.username}</span>}
                       <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11, background: st.bg, color: st.color }}>{st.label}</span>
                       <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11, background: "#f3f4f6", color: "#666" }}>{item.reply_type}</span>
+                      {item.media_permalink && (
+                        <a href={item.media_permalink} target="_blank" rel="noopener noreferrer"
+                          style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11, background: "#fef3c7", color: "#92400e", textDecoration: "none" }}>
+                          {item.media_title || "ver post"}
+                        </a>
+                      )}
                       <span style={{ fontSize: 11, color: "#999" }}>{item.attempts}/{item.max_attempts}</span>
                     </div>
                     <span style={{ fontSize: 11, color: "#999" }}>
@@ -523,6 +534,12 @@ export default function ControlPage() {
                       {item.username && <span style={{ fontSize: 13, fontWeight: 500 }}>@{item.username}</span>}
                       <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11, background: "#f3f4f6", color: "#666" }}>{item.reply_type}</span>
                       {item.category && <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11, background: "#dbeafe", color: "#1d4ed8" }}>{item.category}</span>}
+                      {item.media_permalink && (
+                        <a href={item.media_permalink} target="_blank" rel="noopener noreferrer"
+                          style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11, background: "#fef3c7", color: "#92400e", textDecoration: "none" }}>
+                          {item.media_title || "ver post"}
+                        </a>
+                      )}
                     </div>
                     <span style={{ fontSize: 11, color: "#999" }}>{new Date(item.created_at).toLocaleString("pt-BR")}</span>
                   </div>
