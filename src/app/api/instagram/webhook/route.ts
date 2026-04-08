@@ -1,23 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { after } from "next/server";
 import crypto from "crypto";
-import { filterComment } from "@/lib/filters";
-import { generateReply } from "@/lib/llm";
-import { replyToComment, hideComment, getMediaCaption, getMediaComments, hasAlreadyReplied } from "@/lib/instagram";
 import { generateDmReply, sendDm, sendDmWithWhatsApp } from "@/lib/dm";
-import { generateMentionReply, commentOnMedia, getMentionMediaInfo } from "@/lib/mentions";
-import { isDuplicate, isOnCooldown } from "@/lib/dedup";
+import { isDuplicate } from "@/lib/dedup";
 import { canReply } from "@/lib/rate-limit";
 import { log } from "@/lib/logger";
-import { OWN_USERNAME } from "@/lib/constants";
-import { getVideoContext, saveFailedReply, logResponse, recordStat, getBotMode, queryRetry } from "@/lib/supabase";
-import { shouldSkip, EMOJI_ONLY_SKIP_RATE } from "@/lib/smart-skip";
-import { shouldSkipNight } from "@/lib/time-awareness";
-import { searchSimilar } from "@/lib/embeddings";
-import { calculateDelay, INLINE_DELAY_MAX } from "@/lib/delay";
+import { recordStat, getBotMode, logResponse, saveFailedReply } from "@/lib/supabase";
 import "@/lib/env";
-
-const EMOJI_ONLY_REGEX = /^[\p{Emoji}\p{Emoji_Component}\s]+$/u;
 
 export async function GET(req: NextRequest) {
   const searchParams = req.nextUrl.searchParams;
@@ -124,72 +113,6 @@ async function processWebhook(body: WebhookPayload, botMode: string) {
 
     // Comentarios e mentions desativados — Maria responde manualmente
     // Webhooks continuam chegando pra log/debug
-  }
-}
-
-async function processMentions(entry: WebhookEntry, botMode: string) {
-  for (const change of entry.changes || []) {
-    if (change.field !== "mentions") continue;
-
-    const mediaId = change.value?.media?.id;
-    if (!mediaId) continue;
-
-    // Deduplicacao
-    const mentionKey = `mention_${mediaId}`;
-    if (await isDuplicate(mentionKey)) {
-      log("duplicate_skipped", { comment_id: mentionKey });
-      continue;
-    }
-
-    log("mention_received", { media_id: mediaId });
-
-    // Rate limiting
-    if (!await canReply()) {
-      log("rate_limited", { comment_id: mentionKey });
-      continue;
-    }
-
-    // Buscar info do post que nos marcou
-    const mediaInfo = await getMentionMediaInfo(mediaId);
-    const caption = mediaInfo?.caption || "";
-    const username = mediaInfo?.username || "amigo";
-
-    log("mention_received", { media_id: mediaId, username, text: caption.slice(0, 100) });
-
-    // Delay
-    const delay = Math.floor(Math.random() * 30 + 15) * 1000;
-    await new Promise(r => setTimeout(r, delay));
-
-    // Gerar resposta
-    const reply = await generateMentionReply(caption, username);
-    if (!reply) {
-      log("reply_failed", { comment_id: mentionKey, error: "no mention reply generated" });
-      continue;
-    }
-
-    log("reply_generated", { comment_id: mentionKey, reply: reply.slice(0, 100) });
-
-    // Modo manual: salva na fila
-    if (botMode === "manual") {
-      await saveFailedReply(mentionKey, reply, username, "comment", mediaId, undefined, caption);
-      log("reply_scheduled", { comment_id: mentionKey, reason: "manual_mode" });
-      logResponse({ originalText: caption, botReply: reply, mediaId, username, replyType: "mention" });
-      continue;
-    }
-
-    // Comentar no post
-    const success = await commentOnMedia(mediaId, reply);
-    if (success) {
-      log("mention_replied", { media_id: mediaId, username, reply: reply.slice(0, 100) });
-      logResponse({ originalText: caption, botReply: reply, mediaId, username, replyType: "mention" });
-      recordStat("reply_sent");
-      if (reply.includes("perfil") || reply.includes("@mariaconsultoracannabica")) {
-        recordStat("reply_sent", "mention_cta");
-      }
-    } else {
-      log("reply_failed", { comment_id: mentionKey, error: "comment on mention failed" });
-      recordStat("reply_failed");
-    }
   }
 }
 

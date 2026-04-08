@@ -1,5 +1,4 @@
 import { pool } from "@/lib/db";
-import { embedAndStore } from "@/lib/embeddings";
 
 export async function queryRetry(text: string, params?: unknown[]) {
   try {
@@ -144,9 +143,6 @@ export async function logResponse(params: {
       ],
     );
     const rowId = result.rows[0]?.id as number | undefined;
-    if (rowId && (params.replyType === "comment" || params.source === "manual")) {
-      embedAndStore(rowId, `${params.originalText} -> ${params.botReply}`).catch(() => {});
-    }
     return rowId ?? null;
   } catch (e) {
     console.error("[response_log] error:", e);
