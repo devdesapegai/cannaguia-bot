@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
 
       const isHater = item.category === "hater";
       const isReply = !!item.comment_id && recentComments.some(
-        (c: { isOwn?: boolean }) => c.isOwn,
+        (c) => (c as { isOwn?: boolean }).isOwn,
       );
 
       const result = await generateReply(
