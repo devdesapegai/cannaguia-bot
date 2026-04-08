@@ -75,7 +75,10 @@ async function searchSimilarInner(
        AND media_id != $2
        AND created_at > now() - interval '30 days'
        AND 1 - (embedding <=> $1::vector) > 0.4
-     ORDER BY embedding <=> $1::vector
+       AND (feedback IS NULL OR feedback != 'ruim')
+     ORDER BY
+       CASE WHEN source = 'manual' THEN 0 ELSE 1 END,
+       embedding <=> $1::vector
      LIMIT $3`,
     [vectorStr, excludeMediaId, limit],
   );

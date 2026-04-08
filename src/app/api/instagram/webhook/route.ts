@@ -10,7 +10,7 @@ import { isDuplicate, isOnCooldown } from "@/lib/dedup";
 import { canReply } from "@/lib/rate-limit";
 import { log } from "@/lib/logger";
 import { OWN_USERNAME } from "@/lib/constants";
-import { getVideoContext, saveFailedReply, logResponse, recordStat, getBotMode } from "@/lib/supabase";
+import { getVideoContext, saveFailedReply, logResponse, recordStat, getBotMode, queryRetry } from "@/lib/supabase";
 import { shouldSkip, EMOJI_ONLY_SKIP_RATE } from "@/lib/smart-skip";
 import { shouldSkipNight } from "@/lib/time-awareness";
 import { searchSimilar } from "@/lib/embeddings";
@@ -237,10 +237,16 @@ async function processWebhook(body: WebhookPayload, botMode: string) {
         continue;
       }
 
-      // Modo manual: salva na fila pra aprovacao ao inves de postar
-      if (botMode === "manual") {
+      // Modo manual ou post novo (<30 respostas): salva na fila pra aprovacao
+      const postCount = await queryRetry(
+        "SELECT COUNT(*)::int as c FROM response_log WHERE media_id = $1", [mediaId]
+      );
+      const isNewPost = (postCount.rows[0]?.c || 0) < 30;
+
+      if (botMode === "manual" || isNewPost) {
+        const reason = botMode === "manual" ? "manual_mode" : "new_post_manual";
         await saveFailedReply(commentId, result.reply, from?.username, "comment", mediaId, undefined, text);
-        log("reply_scheduled", { comment_id: commentId, reason: "manual_mode" });
+        log("reply_scheduled", { comment_id: commentId, reason });
         logResponse({ commentId, originalText: text, botReply: result.reply, category: result.category, mediaId, username: from?.username, replyType: "comment" });
         continue;
       }

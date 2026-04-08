@@ -122,11 +122,12 @@ export async function logResponse(params: {
   mediaId?: string;
   username?: string;
   replyType: "comment" | "dm" | "mention";
+  source?: "bot" | "manual";
 }): Promise<number | null> {
   try {
     const result = await pool.query(
-      `INSERT INTO response_log (comment_id, original_text, bot_reply, category, media_id, username, reply_type)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+      `INSERT INTO response_log (comment_id, original_text, bot_reply, category, media_id, username, reply_type, source)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
       [
         params.commentId || null,
         params.originalText,
@@ -135,10 +136,11 @@ export async function logResponse(params: {
         params.mediaId || null,
         params.username || null,
         params.replyType,
+        params.source || "bot",
       ],
     );
     const rowId = result.rows[0]?.id as number | undefined;
-    if (rowId && params.replyType === "comment") {
+    if (rowId && (params.replyType === "comment" || params.source === "manual")) {
       embedAndStore(rowId, `${params.originalText} -> ${params.botReply}`).catch(() => {});
     }
     return rowId ?? null;

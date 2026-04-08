@@ -40,11 +40,12 @@ export async function POST(req: NextRequest) {
         if (!rows[0]) return NextResponse.json({ error: "Not found" }, { status: 404 });
         const item = rows[0];
         const replyText = message || item.message;
+        const wasEdited = !!message && message !== item.message;
         const mention = item.username ? `@${item.username} ` : "";
         const success = await replyToComment(item.comment_id, mention + replyText);
         if (success) {
           await queryRetry("DELETE FROM failed_replies WHERE id = $1", [id]);
-          log("reply_posted", { comment_id: item.comment_id, username: item.username, reply: replyText.slice(0, 100) });
+          log("reply_posted", { comment_id: item.comment_id, username: item.username, reply: replyText.slice(0, 100), source: wasEdited ? "manual" : "bot" });
           await logResponse({
             commentId: item.comment_id,
             originalText: item.original_text || "",
@@ -52,6 +53,7 @@ export async function POST(req: NextRequest) {
             mediaId: item.media_id,
             username: item.username,
             replyType: item.reply_type === "dm" ? "dm" : "comment",
+            source: wasEdited ? "manual" : "bot",
           });
           await recordStat("reply_sent");
           return NextResponse.json({ ok: true, posted: true });
