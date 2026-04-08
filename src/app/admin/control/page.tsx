@@ -112,6 +112,7 @@ export default function ControlPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editText, setEditText] = useState("");
   const [queueLoading, setQueueLoading] = useState<Record<number, boolean>>({});
+  const [regenerating, setRegenerating] = useState<Record<number, boolean>>({});
 
   // Responses
   const [responses, setResponses] = useState<ResponseItem[]>([]);
@@ -234,6 +235,25 @@ export default function ControlPage() {
     } finally {
       setQueueLoading(prev => ({ ...prev, [id]: false }));
       if (action === "approve" || action === "reject") setEditingId(null);
+    }
+  }
+
+  async function regenerateQueue(item: QueueItem) {
+    setRegenerating(prev => ({ ...prev, [item.id]: true }));
+    try {
+      const res = await fetch("/api/admin/control/queue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "regenerate", id: item.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Erro ao regenerar");
+      // Atualizar mensagem no item da fila
+      setQueue(prev => prev.map(q => q.id === item.id ? { ...q, message: data.reply } : q));
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setRegenerating(prev => ({ ...prev, [item.id]: false }));
     }
   }
 
@@ -471,6 +491,14 @@ export default function ControlPage() {
                       <button onClick={() => { setEditingId(item.id); setEditText(item.message); }}
                         style={{ padding: "4px 14px", background: "#dbeafe", color: "#2563eb", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>
                         Editar
+                      </button>
+                      <button onClick={() => regenerateQueue(item)} disabled={regenerating[item.id]}
+                        style={{
+                          padding: "4px 14px", background: "#fef3c7", border: "1px solid #fcd34d",
+                          borderRadius: 4, cursor: regenerating[item.id] ? "wait" : "pointer",
+                          fontSize: 12, color: "#92400e", opacity: regenerating[item.id] ? 0.6 : 1,
+                        }}>
+                        {regenerating[item.id] ? "Gerando..." : "Regenerar"}
                       </button>
                       {st.label === "Pausado" ? (
                         <button onClick={() => queueAction(item.id, "resume")} disabled={loading}

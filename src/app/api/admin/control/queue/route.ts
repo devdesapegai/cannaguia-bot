@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { logResponse, recordStat, queryRetry } from "@/lib/supabase";
-import { replyToComment } from "@/lib/instagram";
+import { logResponse, recordStat, queryRetry, getVideoContext } from "@/lib/supabase";
+import { replyToComment, getMediaCaption, getMediaComments } from "@/lib/instagram";
+import { generateReply } from "@/lib/llm";
 import { log } from "@/lib/logger";
 
 export async function GET() {
@@ -20,7 +21,7 @@ export async function GET() {
   }
 }
 
-const VALID_ACTIONS = ["approve", "reject", "edit", "retry", "pause", "resume"];
+const VALID_ACTIONS = ["approve", "reject", "edit", "retry", "pause", "resume", "regenerate"];
 
 export async function POST(req: NextRequest) {
   try {
@@ -94,6 +95,32 @@ export async function POST(req: NextRequest) {
           [id]
         );
         return NextResponse.json({ ok: true });
+      }
+
+      case "regenerate": {
+        const { rows: rRows } = await queryRetry("SELECT * FROM failed_replies WHERE id = $1", [id]);
+        if (!rRows[0]) return NextResponse.json({ error: "Not found" }, { status: 404 });
+        const rItem = rRows[0];
+        const originalText = rItem.original_text || "";
+        const mediaId = rItem.media_id;
+
+        const [caption, videoContext, recentComments] = await Promise.all([
+          mediaId ? getMediaCaption(mediaId) : Promise.resolve(""),
+          mediaId ? getVideoContext(mediaId) : Promise.resolve(""),
+          mediaId ? getMediaComments(mediaId, rItem.comment_id) : Promise.resolve([]),
+        ]);
+
+        const isReply = !!rItem.comment_id && recentComments.some(
+          (c) => (c as { isOwn?: boolean }).isOwn,
+        );
+
+        const result = await generateReply(originalText, caption, false, videoContext, recentComments, isReply);
+        if (!result) {
+          return NextResponse.json({ error: "LLM não gerou resposta" }, { status: 500 });
+        }
+
+        await queryRetry("UPDATE failed_replies SET message = $2 WHERE id = $1", [id, result.reply]);
+        return NextResponse.json({ ok: true, reply: result.reply, category: result.category, replyStyle: result.replyStyle });
       }
 
       default:
