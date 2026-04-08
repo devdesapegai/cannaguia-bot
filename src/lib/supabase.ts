@@ -1,16 +1,5 @@
-import pg from "pg";
-
-const DATABASE_URL = process.env.DATABASE_URL;
-
-if (!DATABASE_URL) {
-  throw new Error("DATABASE_URL must be set");
-}
-
-const pool = new pg.Pool({
-  connectionString: DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
-  max: 5,
-});
+import { pool } from "@/lib/db";
+import { embedAndStore } from "@/lib/embeddings";
 
 export async function getVideoContext(mediaId: string): Promise<string> {
   try {
@@ -121,11 +110,11 @@ export async function logResponse(params: {
   mediaId?: string;
   username?: string;
   replyType: "comment" | "dm" | "mention";
-}): Promise<void> {
+}): Promise<number | null> {
   try {
-    await pool.query(
+    const result = await pool.query(
       `INSERT INTO response_log (comment_id, original_text, bot_reply, category, media_id, username, reply_type)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
       [
         params.commentId || null,
         params.originalText,
@@ -136,8 +125,14 @@ export async function logResponse(params: {
         params.replyType,
       ],
     );
+    const rowId = result.rows[0]?.id as number | undefined;
+    if (rowId && params.replyType === "comment") {
+      embedAndStore(rowId, `${params.originalText} -> ${params.botReply}`).catch(() => {});
+    }
+    return rowId ?? null;
   } catch (e) {
     console.error("[response_log] error:", e);
+    return null;
   }
 }
 

@@ -13,6 +13,7 @@ import { OWN_USERNAME } from "@/lib/constants";
 import { getVideoContext, saveFailedReply, logResponse, recordStat } from "@/lib/supabase";
 import { shouldSkip, EMOJI_ONLY_SKIP_RATE } from "@/lib/smart-skip";
 import { shouldSkipNight } from "@/lib/time-awareness";
+import { searchSimilar } from "@/lib/embeddings";
 import { calculateDelay, INLINE_DELAY_MAX } from "@/lib/delay";
 import "@/lib/env";
 
@@ -206,10 +207,11 @@ async function processWebhook(body: WebhookPayload) {
 
       // Buscar caption e contexto do video
       const isHater = filter.action === "respond_hater";
-      const [caption, videoContext, recentComments] = await Promise.all([
+      const [caption, videoContext, recentComments, similarComments] = await Promise.all([
         media?.id ? getMediaCaption(media.id) : Promise.resolve(""),
         media?.id ? getVideoContext(media.id) : Promise.resolve(""),
         media?.id ? getMediaComments(media.id, commentId) : Promise.resolve([]),
+        media?.id ? searchSimilar(text, media.id, 5).catch(() => []) : Promise.resolve([]),
       ]);
       if (caption) {
         log("caption_fetched", { comment_id: commentId, media_id: mediaId, text: caption.slice(0, 100) });
@@ -218,7 +220,7 @@ async function processWebhook(body: WebhookPayload) {
       }
 
       // Gerar resposta (LLM classifica + responde com estilo aleatorio)
-      const result = await generateReply(text, caption, isHater, videoContext, recentComments, !!parent_id);
+      const result = await generateReply(text, caption, isHater, videoContext, recentComments, !!parent_id, similarComments);
       if (!result) {
         log("reply_failed", { comment_id: commentId, error: "no reply generated" });
         continue;
